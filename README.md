@@ -1,2 +1,2 @@
-# fume
-FUME - Flexible Universal Modelling of Emissions
+# FUME
+## Flexible Universal processor for Modeling Emissions
