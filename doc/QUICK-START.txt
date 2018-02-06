@@ -1,0 +1,24 @@
+FUME emission processor quick start guide
+-----------------------------------------
+
+0. Download FUME code to the $FUME_ROOT directory
+1. Install PostgreSQL 9.5 and PostGIS 2.2 or newer
+2. Install Python 3.5 or newer
+3. Install Python libraries - required: ConfigObj, NumPy, SciPy, Psycopg 2,
+                                        GDAL, pint, netCDF4, pygrib, pyproj,
+                                        pytz
+                            - optional: matplotlib, basemap, shapely, fiona
+                                        (used for plotting)
+4. Initialize PostgreSQL database, ie. database cluster, database user and
+   database. Helper scripts are bundled in the $FUME_ROOT/server directory,
+   for most users running ep_create_database.sh under user "postgres" should be enough.
+5. Run under standard user account in the same directory $FUME_ROOT/server:
+   psql -h <hostname> -p <port> -U <username> [-W] -d <dbname> -f ep_create_database.sql 
+6. Create a working directory, eg. "fume_test" outside of the $FUME_ROOT
+   directory.
+7. Copy example configuration files from the $FUME_ROOT/doc/example-config directory to
+   working directory.
+8. Collect emission inventories and other input files (example data available
+   on FUME website) in one directory, eg. "fume_test/input".
+9. Edit configuration files and set up your case.
+10. Run $FUME_ROOT/client/fume -c fume_run.conf &> fume_run.log

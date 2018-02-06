@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+import importlib
+from argparse import ArgumentParser
+from lib.ep_config import init_global
+
+# Try to detect interactive mode (e.g. pasting parts of code into console)
+# to bypass cmdline arguments parsing - for debugging
+if not hasattr(sys, 'ps1'):
+    argp = ArgumentParser(description=__doc__)
+    argp.add_argument('-c', '--config', type=str, default='fume_run.conf')
+    argp.add_argument('-w', '--workflow', type=str, default='fume_workflow.conf')
+    argv = argp.parse_args()
+    config_filename = argv.config
+else:
+    #mypath = os.getcwd()
+    if os.path.isdir('client'):
+        os.chdir('client')
+    config_filename = 'fume_run.conf'
+
+# Read configuration first
+
+# Find the directory of the executable
+
+execdir = os.path.dirname(os.path.abspath(__file__))
+init_global(config_filename, cfgspec_dir=os.path.join(execdir, 'conf'))
+from lib.ep_config import ep_cfg
+
+from lib.ep_libutil import ep_rtcfg, ep_getconnection
+
+# Save execdir to runtime configuration for use in the ep_internal_path function
+
+ep_rtcfg['execdir'] = execdir
+
+# Set up database connection
+
+connection_info = {
+    'host': ep_cfg.db_connection.host,
+    'port': ep_cfg.db_connection.port,
+    'user': ep_cfg.db_connection.user,
+}
+
+# Collect all schema names for utility functions
+
+ep_cfg.db_connection.all_schemas = {
+    'conf_schema': ep_cfg.db_connection.conf_schema,
+    'static_schema': ep_cfg.db_connection.static_schema,
+    'source_schema': ep_cfg.db_connection.source_schema,
+    'case_schema': ep_cfg.db_connection.case_schema
+}
+
+# Allow empty password in config file and ask the user in ep_getconnection
+
+if ep_cfg.db_connection.password != '':
+    connection_info['password'] = ep_cfg.db_connection.password
+
+ep_getconnection(ep_cfg.db_connection.database, connection_info)
+
+if ep_cfg.debug:
+    # check the db connection
+    from lib.ep_libutil import ep_connection
+    print(ep_connection)
+
+# Set up main queue
+# Moved to ep_workflow.conf file
+with open(argv.workflow, 'r') as workflow_file:
+    main_queue = [l.strip().split()[0] for l in workflow_file if not l.startswith('#')]
+
+# Execute main queue
+
+from lib.ep_libutil import exec_timer
+
+for func in main_queue:
+    print(func)
+    mod_name, func_name = func.rsplit('.', 1)
+    mod_obj = importlib.import_module(mod_name)
+    func_obj = getattr(mod_obj, func_name)
+
+    with exec_timer(func) as timer:
+        func_obj()
+
+# Execute user code here...
+
