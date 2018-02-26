@@ -226,7 +226,7 @@ def run_nh3agri(cfg):
     if cfg.merge_emis: # same emission into rt_cfg
         if 'external_model_data' not in ep_rtcfg.keys():
             ep_rtcfg['external_model_data'] = {}
-
+#                                                                       i,j,k=1       ,t,s=1
         ep_rtcfg['external_model_data']['nh3agri'] = { 'data' : nh3emis[:,:,np.newaxis,:,np.newaxis] / (3600. * nh3mol), 'species' : ['NH3'] }
 
 

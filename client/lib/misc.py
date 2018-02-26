@@ -2,9 +2,14 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as mpl_polygon 
 import shapely.geometry as sh_geom
 from fiona import collection
+from lib.ep_libutil import ep_debug
 
 def get_polygons_from_file(infilename):
-    infile = collection(infilename, 'r')
+    try:
+        infile = collection(infilename, 'r')
+    except IOError:
+        ep_debug('No such file or directory: ', infilename)
+        return []
     return [sh_geom.shape(g['geometry']) for g in infile]
 
 

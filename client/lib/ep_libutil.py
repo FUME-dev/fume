@@ -10,7 +10,7 @@ from lib.ep_config import ep_cfg
 from lib.ep_geo_tools import create_projection,  get_projection_domain_params
 from osgeo import osr
 from lib.debug import ExecTimer
-
+from numpy import zeros 
 __all__ = ['ep_connection', 'ep_getconnection', 'ep_rtcfg']
 
 # This module defines basic common function and procedures for emission processor
@@ -309,6 +309,67 @@ def exec_timer(name):
 
 def ep_internal_path(*paths):
     return path.join(ep_rtcfg['execdir'], *paths)
+
+
+def combine_2_spec(spec1,spec2): # function to combine emission species 
+    return(list(set(spec1).union(spec2)))
+
+def combine_2_emis(em1,spec1,em2,spec2): # function to combine emissions from ep_rtcfg['models'] 
+
+    kx,ky,kz1 = em1.shape[0],em1.shape[1],em1.shape[2]
+    kz2       = em2.shape[2]
+
+    spec =  combine_2_spec(spec1,spec2)
+
+    numspec = len(spec)
+    emisout = zeros((kx,ky,max(kz1,kz2),numspec),dtype=float)
+    for i,s in enumerate(spec):
+
+        if s in spec1:
+            j = spec1.index(s)
+            emisout[:,:,0:kz1,i] += em1[:,:,0:kz1,j]
+        if s in spec2:
+            j = spec2.index(s)
+            emisout[:,:,0:kz2,i] += em2[:,:,0:kz2,j]
+    return(emisout, spec)
+
+def combine_model_emis(em,sp,t):
+    try:
+        emtmp,sptmp = em,sp
+        for m in ep_rtcfg['external_model_data']:
+            specmodel = ep_rtcfg['external_model_data'][m]['species']
+            emismodel = ep_rtcfg['external_model_data'][m]['data'][:,:,:,t,:]
+            emtmp,sptmp = combine_2_emis(emtmp,sptmp,emismodel,specmodel)
+        return(emtmp,sptmp)
+    except KeyError:
+        return(em,sp)
+
+
+def combine_model_spec(spec):
+    # spec - spec list from FUME
+    try:
+        sptmp = spec
+        sptmp =  [s[1] for s in spec]
+        ep_species = sptmp[:]
+
+        for m in ep_rtcfg['external_model_data']:
+            specmodel = ep_rtcfg['external_model_data'][m]['species']
+            sptmp = combine_2_spec(sptmp,specmodel)
+
+        spectuple = []
+        for s in sptmp:
+            if s in ep_species:
+                si = ep_species.index(s)
+                spectuple.append((spec[si][0],s))
+            else:
+                spectuple.append((None,s))
+
+
+        return(spectuple)
+    except KeyError:
+        return(spec)
+
+    
 
 
 # initialize null ep_connection - use function ep_getconnection for real connection initialization

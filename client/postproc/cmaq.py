@@ -93,7 +93,7 @@ class CMAQAreaWriter(CMAQWriter):
         self.timevar[timestep,:,0] = date
         self.timevar[timestep,:,1] = time
         for i, spectuple in enumerate(self.species):
-            specid, specname = spectuple
+#            specid, specname = spectuple
             self.outvars[i][timestep,:,:,:] = data.transpose(2,1,0,3)[:,:,:,i]
 
     def receive_area_species(self, species):
@@ -106,7 +106,7 @@ class CMAQAreaWriter(CMAQWriter):
         self.timevar.long_name = 'FLAG           '
         self.timevar.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
 
-        for specid, specname in self.species:
+        for  specid, specname in self.species:
             emisvar = self.outfile.createVariable(specname, 'f4', ('TSTEP', 'LAY', 'ROW', 'COL'))
             emisvar.long_name = long_object_name(specname)
             emisvar.units = 'moles/s for gases and  g/s for aerosols'
@@ -180,8 +180,7 @@ class CMAQPointWriter(CMAQWriter):
         self.timevarstk[timestep,:,0] = date
         self.timevarstk[timestep,:,0] = time
 
-        for i, spectuple in enumerate(self.species):
-            specid, specname = spectuple
+        for i, spec1 in enumerate(self.species):
             self.outvars[i][timestep,0,:,0] = data[:,i]
 
     def receive_stack_params(self, stacks):

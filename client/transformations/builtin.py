@@ -180,7 +180,8 @@ class SourcesToGridTransformation(Transformation):
 
     def apply(self):
         cur = self.db_connection.cursor()
-        filters, filter_values, joins = SourceFilterTransformation.parse_filters(self.filters)
+        filters, filter_values, joins = SourceFilterTransformation.parse_filters(self.filters,
+                                                                                 fqn=False)
         join_texts = ''
         for j in joins:
             if j == 'eset':
@@ -217,8 +218,9 @@ class SourceFilterTransformation(OneToOneTransformation):
 
     Available filter operators: defined by _sql_operators dictionary
     """
-    _available_filters = {'inventory': 'inv_name', 'eset': 'eset_name',
-                          'source_type': 'source_type'}
+    _available_filters = {'inventory': 'ep_inventories.inv_name',
+                          'eset': 'ep_emission_sets.eset_name',
+                          'source_type': 'ep_in_sources.source_type'}
 
     def __init__(self, inrel=None, outrel=None, filters=None):
         super().__init__(inrel=inrel, outrel=outrel)
@@ -231,7 +233,7 @@ class SourceFilterTransformation(OneToOneTransformation):
         return 'Source filter: ' + str(self.inrelation) + ' -> ' + str(self.outrelation)
 
     @staticmethod
-    def parse_filters(filters):
+    def parse_filters(filters, fqn=True):
         filter_sql = ''
         filter_values = []
         joins = set()
@@ -247,6 +249,8 @@ class SourceFilterTransformation(OneToOneTransformation):
 
             try:
                 db_col = SourceFilterTransformation._available_filters[col]
+                if not fqn:
+                    db_col = db_col.split('.')[1]
             except KeyError:
                 continue
 
@@ -267,15 +271,15 @@ class SourceFilterTransformation(OneToOneTransformation):
         for j in joins:
             if j == 'eset':
                 select_cols = 'DISTINCT({})'.format(select_cols)
-                join_texts += (' JOIN "{sch}".ep_in_sources AS isrc USING (geom_id)'
-                               ' JOIN "{sch}".ep_emission_sets AS es USING (eset_id)'.format(
+                join_texts += (' JOIN "{sch}".ep_in_sources USING (geom_id)'
+                               ' JOIN "{sch}".ep_emission_sets USING (eset_id)'.format(
                                 sch=self.cfg.db_connection.source_schema))
             elif j == 'inventory':
                 select_cols = 'DISTINCT({})'.format(select_cols)
-                join_texts += (' JOIN "{sch}".ep_in_sources AS isrc USING (geom_id)'
-                               ' JOIN "{sch}".ep_emission_sets AS es USING (eset_id)'
-                               ' JOIN "{sch}".ep_source_files AS sf USING (file_id)'
-                               ' JOIN "{sch}".ep_inventories AS inv USING (inv_id)'.format(
+                join_texts += (' JOIN "{sch}".ep_in_sources USING (geom_id)'
+                               ' JOIN "{sch}".ep_emission_sets USING (eset_id)'
+                               ' JOIN "{sch}".ep_source_files USING (file_id)'
+                               ' JOIN "{sch}".ep_inventories USING (inv_id)'.format(
                                 sch=self.cfg.db_connection.source_schema))
 
         if self.outrelation.temp:

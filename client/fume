@@ -74,7 +74,6 @@ with open(argv.workflow, 'r') as workflow_file:
 from lib.ep_libutil import exec_timer
 
 for func in main_queue:
-    print(func)
     mod_name, func_name = func.rsplit('.', 1)
     mod_obj = importlib.import_module(mod_name)
     func_obj = getattr(mod_obj, func_name)

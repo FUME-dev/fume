@@ -43,7 +43,7 @@ BEGIN
             UNION ALL
             SELECT c.parent as p_id, c.cat_id, tv.tv_id FROM %I.ep_emission_categories c, find_parent f LEFT JOIN %I.ep_time_var_mapping tv ON f.cat_id=tv.cat_id WHERE c.cat_id = f.p_id AND tv.tv_id IS NULL
         )
-        SELECT cat_id FROM find_parent ORDER BY p_id LIMIT 1', conf_schema, conf_schema, conf_schema, conf_schema) INTO par_id USING cat_id;
+        SELECT cat_id FROM find_parent ORDER BY cat_id LIMIT 1', conf_schema, conf_schema, conf_schema, conf_schema) INTO par_id USING cat_id;
 
         -- RAISE NOTICE '%', format('INSERT INTO %I.ep_time_var_mapping_all SELECT %s, tv_id from %I.ep_time_var_mapping WHERE cat_id=%s', case_schema, par_id, conf_schema, cat_id);
         EXECUTE format('INSERT INTO %I.ep_time_var_mapping_all SELECT $1, tv_id from %I.ep_time_var_mapping WHERE cat_id=$2', case_schema, conf_schema) USING cat_id, par_id;

@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as mpl_polygon
 from postproc.receiver import DataReceiver, requires
 from lib.misc import get_polygons_from_file, draw_multipolygon_on_map
+from lib.ep_libutil import ep_debug
 
 
 _basemap_resolution = 'i'
@@ -78,6 +79,9 @@ class EmissPlot():
         try:
             self.overlay_polygons = get_polygons_from_file(self.cfg.postproc.emissplotter.overlay_polygons)
         except AttributeError:
+            self.overlay_polygons = []
+        except IOError:
+            ep_debug('No such file or directory: ', self.cfg.postproc.emissplotter.overlay_polygons)
             self.overlay_polygons = []
 
     def plot(self, data, filename, **kwargs):

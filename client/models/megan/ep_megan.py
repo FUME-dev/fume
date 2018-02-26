@@ -96,7 +96,7 @@ def preproc(cfg):
     meganivars.append('SLTYP')
     remapped = []
     
-    print('II: remapping megan input to the case grid')
+    ep_debug('II: remapping megan input to the case grid')
     cdo = Cdo()
     for f,v in zip(files, meganivars):
         fp = os.path.join(megan_input_dir,f)
@@ -160,7 +160,7 @@ def preproc(cfg):
         megan_lai = Dataset(megan_temp_dir+'/'+'megan_in_lai.nc','w',format='NETCDF3_CLASSIC')
         megan_pft = Dataset(megan_temp_dir+'/'+'megan_in_pft.nc','w',format='NETCDF3_CLASSIC')
         megan_EF =  Dataset(megan_temp_dir+'/'+'megan_in_EF.nc','w',format='NETCDF3_CLASSIC')
-
+        megan_SLTYP = Dataset(megan_temp_dir+'/'+'megan_in_SLTYP.nc','w',format='NETCDF3_CLASSIC')
     except IOError:
         print('EE: Error while opening megan input files. Check paths: {}!'.format(megan_temp_dir))
         raise
@@ -187,6 +187,9 @@ def preproc(cfg):
     megan_pft.createDimension('VAR', 1)
     megan_pft.createDimension('ROW', ny)
     megan_pft.createDimension('COL', nx)
+
+    megan_SLTYP.createDimension('ROW', ny)
+    megan_SLTYP.createDimension('COL', nx)
 
 
 
@@ -253,6 +256,9 @@ def preproc(cfg):
     fields_pft.units = "nondimension    "
     fields_pft.var_desc = ""
 
+
+    fields_SLTYP = megan_SLTYP.createVariable('SLTYP','f4', ('ROW','COL'))
+
     EF_fields = ['LAT','LONG','DTEMP','DSRAD','EF_ISOP','EF_MYRC','EF_SABI','EF_LIMO','EF_A_3CAR','EF_OCIM','EF_BPIN','EF_APIN','EF_OMTP','EF_FARN','EF_BCAR','EF_OSQT','EF_MBO','EF_MEOH','EF_ACTO','EF_CO','EF_NO','EF_BIDER','EF_STRESS','EF_OTHER']
 
 
@@ -262,6 +268,8 @@ def preproc(cfg):
         EF_fields_o[i].long_name = EF_fields[i].ljust(16)
         EF_fields_o[i].units = ""
         EF_fields_o[i].var_desc = ""
+
+
 
     EF_fields_o[0].units = "DEGREE          " 
     EF_fields_o[1].units = "DEGREE          "
@@ -311,6 +319,8 @@ def preproc(cfg):
     fields_pft[15, 0, :, :] = remapped[-2][16, :, :]  # CORN
 
 
+    fields_SLTYP[:] = remapped[-1].transpose(1,0)
+    megan_SLTYP.close()
     # write global attributes
     # first the attributes common to each megan input file
 
@@ -384,7 +394,7 @@ def preproc(cfg):
 
     setattr(megan_EF,'VAR-LIST', ''.join(longfldname))
 
-
+    
 
 
 #############################################################################
@@ -582,10 +592,15 @@ def met_write_megan_met(cfg):
 
     iv = megan_fields.index('PREC_ADJ')
     megan_met_var[iv][:] = 1.
+
+
+    megan_SLTYP = Dataset(megan_temp_dir+'/'+'megan_in_SLTYP.nc','r')
+
     iv = megan_fields.index('SLTYP')
-    for t in range(len(datetimes)):
-        megan_met_var[iv][t,0,:,:] = remapped[-1]
-     
+    for t in range(len(datestimes)):
+        megan_met_var[iv][t,0,:,:] = megan_SLTYP.variables['SLTYP'][:]
+    
+    megan_SLTYP.close()
     # attributes
 
     megangrp.FTYPE=np.int32(1)

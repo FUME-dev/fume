@@ -1,6 +1,7 @@
 import numpy as np
 from lib.ep_libutil import ep_debug
 from postproc.provider import DataProvider, pack
+from lib.ep_libutil import combine_2_spec,combine_2_emis,combine_model_emis,combine_model_spec
 
 
 class EmissProvider(DataProvider):
@@ -81,12 +82,15 @@ class EmissProvider(DataProvider):
             q = 'SELECT ep_emiss_time_series(%s,%s,%s,%s,%s,%s::text,%s)'
             ep_debug('Fetching area emissions for timestep', i)
             cur.execute(q, (self.cfg.domain.nx, self.cfg.domain.ny, self.cfg.domain.nz,
-                            [int(i[0]) for i in self.species], self.rt_cfg['run']['datestimes'][i],
+                            [int(i[0]) for i in self.ep_species], self.rt_cfg['run']['datestimes'][i],
                             self.cfg.db_connection.case_schema,
                             self.cfg.run_params.output_params.save_time_series_to_db))
 
-            emis = np.array(cur.fetchone()[0])
-
+            ep_emis = np.array(cur.fetchone()[0])
+            # combine area species with other model species
+            ep_species_names = [s[1] for s in self.ep_species]
+            emis, sp = combine_model_emis(ep_emis, ep_species_names ,i)
+            
             self.distribute('area_emiss', timestep=i, data=emis)
 
         cur.close()
@@ -107,13 +111,22 @@ class EmissProvider(DataProvider):
             ep_debug('Getting list of species...', q)
             with self.db.cursor() as cur:
                 cur.execute(q)
-                self.species = cur.fetchall()
+                ep_species = cur.fetchall()
+                
+            
+#            ep_species_names = [s[1] for s in ep_species]
+
+            self.species = combine_model_spec(ep_species)
+            self.ep_species = ep_species
+#            ep_debug('Species from FUME: {}.'.format(','.join(ep_species_names)))
+#            ep_debug('Species from FUME and other models: {}.'.format(','.join(self.species)))
 
             self.distribute('area_species', species=self.species)
 
     @pack('point_emiss')
     def get_point_emission_time_series(self):
         self.get_point_species()
+        self.get_point_sources_params()
         cur = self.db.cursor()
 
         for i in range(self.cfg.run_params.time_params.num_time_int):
