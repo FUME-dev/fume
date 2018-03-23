@@ -1,12 +1,80 @@
 <html>
     <body>
-        <h1>FUME</h1>
-        <h2>Flexible Universal processor for Modeling Emissions</h2>
-
-        <a href="https://github.com/FUME-dev/fume">View on GitHub</a>
+        <p>
+            <h1>FUME</h1>
+            <strong>F</strong>lexible <strong>U</strong>niversal
+            Processor for <strong>M</strong>odeling <strong>E</strong>missions
+        </p>
+        <p>
+            FUME is an open source software intended primarily for the preparation of emissions for chemical transport models.
+            As such, FUME is responsible for preprocessing the input files and the spatial distribution, chemical speciation,
+            and time disaggregation of the primary emission inputs. The main characteristics of FUME are:
+            <ul>
+                <li> PostgreSQL, PostGIS, and Python based (for minimum versions see model documentation);
+                <li> flexible and configurable tool for emissions processing; 
+                <li> independent on specific input data;
+                <li> applicable in different scales (local / regional / continental);
+                <li> not limited to any geographical coordinate systems;
+                <li> configurable chains of emissions processing;
+                <li> easy implementation of new modules;
+                <li> easy involvement of specialised external models (e.g. for biogenic emissions) through common interface;
+                <li> outputs usable for different types of models / application;
+                <li> allowing for output also on irregular grids and general polygons;
+                <li> reporting and QA/QC.
+            </ul>
+        </p>
 
         <p>
-        The first version of emission processor FUME (Flexible Universal processor for Modeling Emissions) was created within the project of the Technology Agency of the Czech Republic No. TA04020797 Advanced emission processor utilizing new data sources. Software is distributed free of charge under the licence GNU GPL v3.0. With requests for technical support please contact Mr. Ondrej Vlcek.
+            FUME is being currently used for the air quality modelling in the Czech Hydrometeorological Institute
+            and in several projects: <a href="https://powietrze.malopolska.pl/en/life-ip/">LIFE-IP Malopolska</a>
+            (action C.6, project reference LIFE14 IPE/PL/000021) and
+            <a href="https://www.mff.cuni.cz/to.en/verejnost/konalo-se/2018-01-urbi/">URBI PRAGENSI</a>
+            (project reference CZ.07.1.02/0.0/0.0/16_040/0000383).
         </p>
+
+        <p>
+            Despite of intensive work on its development, there are still some issues that need to be finished, mainly:
+            <ul>
+                <li> improvement of documentation;
+                <li> increase of the computational efficiency;
+                <li> user-friendly usage / reporting / logging;
+                <li> additional possibilities to process emissions (e.g. provide emissions with proxy data for spatial disaggregation).
+            </ul>
+        </p>
+
+        <p>
+            Therefore we hope that interested users will not be discouraged by some initial difficulties / inconvenience
+            that are an inevitable part of the newly developed software. We will be happy if you  provide us with feedback
+            and we will try to provide you maximum support within our limited time resources.
+        </p>
+
+        <p>
+            FUME is a common project of the <a href="http://www.ustavinformatiky.cz/">Czech Academy of Sciences</a>,
+            <a href="http://www.chmi.cz/">Czech Hydrometeorological Institute</a>, <a href="http://kfa.mff.cuni.cz/">Charles University</a>,
+            and Czech Technical University in Prague (<a href="https://www.ciirc.cvut.cz/">CIIRC</a>) and <a href="https://www.fd.cvut.cz/">FD</a>).
+        </p>
+
+        <h3> Availability </h3>
+        Software is distributed free of charge under the licence GNU GPL v3.0.
+        View on <a href="https://github.com/FUME-dev/fume">GitHub</a>.
+
+        <h3> Citing </h3>
+        Here we give you a recommended citing of the FUME:
+        Benešová, N., Belda, M., Eben, K., Geletič, J., Huszár, P., Juruš, P., Krč, P., Resler, J. and Vlček, O. (2018):
+        New open source emission processor for air quality models.
+        In Sokhi, R., Tiwari, P. R., Gállego, M. J., Craviotto Arnau, J. M., Castells Guiu, C. & Singh, V. (eds)
+        <i>Proceedings of Abstracts 11th International Conference on Air Quality Science and Application</i>.
+        DOI: 10.18745/PB.19829. (pp. 27). Published by University of Hertfordshire.
+        Paper presented at Air Quality 2018 conference, Barcelona, 12-16 March.
+
+        <h3> Support </h3>
+        The developing team does not provide a regular support. But we are ready and will be happy to provide
+        advice for new FUME users. Question should be sent to <a href="mailto:vlcek@chmi.cz">Ondrej Vlcek</a>. 
+
+
+        <h3> Acknowledgement </h3>
+        The first version of emission processor FUME (Flexible Universal processor for Modeling Emissions)
+        was created within the project of the Technology Agency of the Czech Republic No. TA04020797
+        <i>Advanced emission processor utilizing new data sources</i>.
     </body>
 </html>
