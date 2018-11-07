@@ -45,16 +45,17 @@ class EmissProvider(DataProvider):
     @pack('total_emiss')
     def get_total_emissions(self):
         """
-        Fetch total area emission data from the database and distribute to the receiver objects.
+        Fetch total emission data from the database and distribute to the receiver objects.
 
         The emissions received are speciated but not time dissagreggated.
+        Only works with aggregate_speciated_emissions = no
         """
 
         self.get_area_species() # Make sure we have the list of species ready first
         cur = self.db.cursor()
 
         q = 'SELECT ep_total_emissions(%s, %s, %s, %s, %s)'
-        ep_debug('Fetching total area emissions...')
+        ep_debug('Fetching total emissions...')
         cur.execute(q, (self.cfg.domain.nx, self.cfg.domain.ny, self.cfg.domain.nz,
                         [int(i[0]) for i in self.species],
                         self.cfg.db_connection.case_schema))
@@ -79,18 +80,22 @@ class EmissProvider(DataProvider):
         cur = self.db.cursor()
 
         for i in range(self.cfg.run_params.time_params.num_time_int):
-            q = 'SELECT ep_emiss_time_series(%s,%s,%s,%s,%s,%s::text,%s)'
+            q = 'SELECT ep_emiss_time_series(%s,%s,%s,%s,%s,%s::text,%s,%s)'
             ep_debug('Fetching area emissions for timestep', i)
             cur.execute(q, (self.cfg.domain.nx, self.cfg.domain.ny, self.cfg.domain.nz,
                             [int(i[0]) for i in self.ep_species], self.rt_cfg['run']['datestimes'][i],
                             self.cfg.db_connection.case_schema,
-                            self.cfg.run_params.output_params.save_time_series_to_db))
+                            self.cfg.run_params.output_params.save_time_series_to_db,
+                            self.cfg.run_params.aggregate_speciated_emissions))
 
             ep_emis = np.array(cur.fetchone()[0])
             # combine area species with other model species
             ep_species_names = [s[1] for s in self.ep_species]
-            emis, sp = combine_model_emis(ep_emis, ep_species_names ,i)
-            
+            if len(ep_species_names) == 0:
+                ep_debug('WARNING: no emissions computed internally with FUME for timestep {}. It will continue anyway trying to collect emissions from external models.'.format(i))
+                emis, sp = combine_model_emis(ep_emis, ep_species_names ,i, noanthrop = True)
+            else:
+                emis, sp = combine_model_emis(ep_emis, ep_species_names ,i )
             self.distribute('area_emiss', timestep=i, data=emis)
 
         cur.close()
@@ -107,7 +112,12 @@ class EmissProvider(DataProvider):
         try:
             self.species
         except AttributeError:  # Read the list from the database is it does not exist
-            q = 'SELECT * from "{}".get_species'.format(self.cfg.db_connection.case_schema)
+            if self.cfg.run_params.aggregate_speciated_emissions:
+                viewname = 'get_species_agg'
+            else:
+                viewname = 'get_species'
+
+            q = 'SELECT * from "{}"."{}"'.format(self.cfg.db_connection.case_schema, viewname)
             ep_debug('Getting list of species...', q)
             with self.db.cursor() as cur:
                 cur.execute(q)
@@ -119,7 +129,7 @@ class EmissProvider(DataProvider):
             self.species = combine_model_spec(ep_species)
             self.ep_species = ep_species
 #            ep_debug('Species from FUME: {}.'.format(','.join(ep_species_names)))
-#            ep_debug('Species from FUME and other models: {}.'.format(','.join(self.species)))
+            ep_debug('Species from FUME and other models: {}.'.format(','.join([s[1] for s in self.species])))
 
             self.distribute('area_species', species=self.species)
 
@@ -157,8 +167,11 @@ class EmissProvider(DataProvider):
             ep_debug('Getting list of stacks...', q)
             with self.db.cursor() as cur:
                 cur.execute(q)
-                self.stacks = np.array(cur.fetchall(), dtype=np.float).squeeze(axis=1)
- 
+                if cur.rowcount > 0:
+                    self.stacks = np.array(cur.fetchall(), dtype=np.float).squeeze(axis=1)
+                else:
+                    self.stacks = np.array([], dtype=np.float)
+
             self.distribute('stack_params', stacks=self.stacks)
 
     @pack('point_species')

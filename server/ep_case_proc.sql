@@ -124,7 +124,7 @@ BEGIN
     -- calculate split factors from speciation compound profiles
     execute format('TRUNCATE %I.ep_sp_factors RESTART IDENTITY CASCADE',case_schema);
     execute format('INSERT INTO %I.ep_sp_factors (cat_id, spec_in_id, spec_sp_id, split_factor)
-					SELECT cat_id, spec_in_id, ma.spec_sp_id, sum((10*react_fact*percentage)/(mol_weight)) AS split_factor
+					SELECT cat_id, spec_in_id, ma.spec_sp_id, sum((react_fact*fraction)/(mol_weight)) AS split_factor
 					FROM %I.ep_comp_cat_profiles
 					JOIN %I.ep_chem_compounds USING(chem_comp_id)
 					JOIN (SELECT * FROM %I.ep_comp_mechanisms_assignment WHERE mech_id = ANY (%L)) AS ma USING(chem_comp_id)
@@ -205,11 +205,47 @@ END;
 $$ LANGUAGE plpgsql;
 
 
-create or replace function ep_apply_spec_factors(
+create or replace function ep_apply_spec_factors_aggregate(
     conf_schema varchar default 'config',
     case_schema varchar default 'case')
   returns void as
 $$
+begin
+    -- speciation
+    -- raise notice '%', clock_timestamp();
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec DROP CONSTRAINT IF EXISTS ep_grid_emissions_spec_pkey',case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec DROP CONSTRAINT IF EXISTS ep_grid_emissions_spec_cat_id_fkey',case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec DROP CONSTRAINT IF EXISTS ep_grid_emissions_spec_grid_id_fkey',case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec DROP CONSTRAINT IF EXISTS ep_grid_emissions_spec_spec_id_fkey',case_schema);
+    EXECUTE format('TRUNCATE %I.ep_grid_emissions_spec RESTART IDENTITY CASCADE',case_schema);
+    EXECUTE format('INSERT INTO %I.ep_grid_emissions_spec (grid_id, spec_id, cat_id, k, emiss)
+	                    SELECT g.grid_id, s.spec_mod_id, e.cat_id, sg.k, sum(e.emiss*s.split_factor)
+                        FROM %I.ep_sg_emissions e
+                        JOIN %I.ep_sources_grid sg USING(sg_id)
+                        JOIN %I.ep_grid_tz g USING (grid_id)
+                        JOIN %I.ep_mod_spec_factors_all s USING (cat_id, spec_in_id)
+                        WHERE sg.source_type in (''A'', ''L'')
+                        GROUP BY g.grid_id, s.spec_mod_id, e.cat_id, sg.k', case_schema, case_schema, case_schema, case_schema, case_schema);
+    -- recompile statistics
+    execute format('ANALYZE %I.ep_grid_emissions_spec', case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec ADD CONSTRAINT ep_grid_emissions_spec_pkey PRIMARY KEY (grid_id, spec_id, cat_id)',case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec ADD CONSTRAINT ep_grid_emissions_spec_cat_id_fkey FOREIGN KEY (cat_id) REFERENCES %I."ep_emission_categories"',case_schema, conf_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec ADD CONSTRAINT ep_grid_emissions_spec_grid_id_fkey FOREIGN KEY (grid_id) REFERENCES %I.ep_grid_tz',case_schema, case_schema);
+    execute format('ALTER TABLE %I.ep_grid_emissions_spec ADD CONSTRAINT ep_grid_emissions_spec_spec_id_fkey FOREIGN KEY (spec_id) REFERENCES %I.ep_out_species',case_schema, case_schema);
+
+    PERFORM ep_apply_spec_factors(conf_schema, case_schema, array['P']);
+end;
+$$ LANGUAGE plpgsql;
+
+
+create or replace function ep_apply_spec_factors(
+    conf_schema varchar default 'config',
+    case_schema varchar default 'case',
+    source_type varchar[] default array[]::varchar[])
+  returns void as
+$$
+DECLARE
+    sql text := '';
 begin
     -- speciation
     -- raise notice '%', clock_timestamp();
@@ -218,10 +254,17 @@ begin
     execute format('ALTER TABLE %I.ep_sg_emissions_spec DROP CONSTRAINT IF EXISTS ep_sg_emissions_spec_sg_id_fkey',case_schema);
     execute format('ALTER TABLE %I.ep_sg_emissions_spec DROP CONSTRAINT IF EXISTS ep_sg_emissions_spec_spec_id_fkey',case_schema);
     EXECUTE format('TRUNCATE %I.ep_sg_emissions_spec RESTART IDENTITY CASCADE',case_schema);
-    EXECUTE format('INSERT INTO %I.ep_sg_emissions_spec (sg_id, spec_id, cat_id, emiss)
-	                    SELECT e.sg_id, s.spec_mod_id, e.cat_id, e.emiss*s.split_factor
-                        FROM %I.ep_sg_emissions e
-                        JOIN %I.ep_mod_spec_factors_all s USING (cat_id, spec_in_id)', case_schema, case_schema, case_schema);
+    sql := format('INSERT INTO %I.ep_sg_emissions_spec (sg_id, spec_id, cat_id, emiss)
+	               SELECT e.sg_id, s.spec_mod_id, e.cat_id, e.emiss*s.split_factor
+                   FROM %I.ep_sg_emissions e
+                   JOIN %I.ep_mod_spec_factors_all s USING (cat_id, spec_in_id)', case_schema, case_schema, case_schema);
+    IF cardinality(source_type) != 0 THEN
+        sql := sql || FORMAT('JOIN %I.ep_sources_grid sg USING(sg_id)', case_schema) || ' WHERE sg.source_type = ANY($1)';
+        EXECUTE sql USING source_type;
+    ELSE
+        EXECUTE sql;
+    END IF;
+
     -- recompile statistics
     execute format('ANALYZE %I.ep_sg_emissions_spec', case_schema);
     execute format('ALTER TABLE %I.ep_sg_emissions_spec ADD CONSTRAINT ep_sg_emissions_spec_pkey PRIMARY KEY (sg_id, spec_id, cat_id)',case_schema);

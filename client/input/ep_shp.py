@@ -6,7 +6,7 @@ def osgeo_str_to_utf(s, encoding='Latin-1'):
     try:
         return bytes([ord(c) for c in s]).decode(encoding)
     except ValueError:
-        return bytearray(s, 'Latin-1', 'replace').decode(encoding)
+        return s
 
 def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema=None, tablename=None, tabletemp=False, tablesrid=None, geomdim=2):
     #global sql,sqlv

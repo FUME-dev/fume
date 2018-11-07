@@ -2,6 +2,25 @@
  Emission processor programming guide
 ======================================
 
+Workflow
+========
+
+Program workflow is controlled by the workflow configuration file
+(WCF, default: fume_workflow.conf). Each line of the WCF is a name of
+a function. The functions get called in the order of the lines. To skip
+a function from being called, comment out the line with the hash sign.
+
+The function name is composed similarly to the way the import is done in
+Python, ie. by module (submodule...) name and name of the function delimited
+by the dot. Avoiding long names in case of a complex directory structure of
+a module can be achieved by importing the symbol in the __init__.py script
+of a module, eg. the ``postproc.run`` function in the workflow is actually
+``postproc.dispatch.run``, but is imported in the ``postproc/__init__.py``
+file::
+
+    from .dispatch import run
+
+
 Postprocessing
 ==============
 

@@ -96,7 +96,7 @@ class WRFreader():
 
         infile = self._files_opened[self.p[0]]
         nt = len(infile.dimensions["Time"])
-        if self.p[1] < nt:
+        if self.p[1] < nt-1:
             self.p[1] += 1
             self._timesteps.append(self.dt())
         elif self.p[0] < len(ep_cfg.input_params.met.met_files)-1: # this not the last file 
@@ -190,7 +190,7 @@ def ep_wrf_met(fields,datestimes):
     # loop over the the requested timesteps
     
     for t,dt in enumerate(datestimes):
-        # find the first  timestep greater than the requested timestep
+        # find the first  timestep equal or greater than the requested timestep
         while reader.dt() < dt: 
             try:
                 reader.next()

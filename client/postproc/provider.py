@@ -7,6 +7,7 @@ Base module for data providers
 
 from abc import ABCMeta
 from collections import defaultdict
+from lib.ep_libutil import ep_debug
 
 
 def pack(name):
@@ -25,8 +26,6 @@ def pack(name):
 
 pack_hooks = {}
 
-pack_order = {}
-
 class DataProviderMeta(ABCMeta):
     def __new__(cls, name, bases, dct):
         inst = super().__new__(cls, name, bases, dct)
@@ -37,7 +36,6 @@ class DataProviderMeta(ABCMeta):
                     raise ValueError('Hook already defined for pack {}'.format(o._pack))
 
                 pack_hooks[o._pack] = n
-                pack_order[o._pack] = rank
                 rank += 1
 
         return inst
@@ -50,6 +48,7 @@ class DataProvider(metaclass=DataProviderMeta):
 
     def __init__(self, *args, **kwargs):
         self.receivers = defaultdict(list)
+        self._packs_run = []
 
         if 'cfg' in kwargs:
             self.cfg = kwargs['cfg']
@@ -61,6 +60,7 @@ class DataProvider(metaclass=DataProviderMeta):
             self.db = kwargs['db']
 
     def register_receiver(self, receiver):
+        ep_debug('*** Pack hooks', pack_hooks)
         for pack in pack_hooks:
             rcv_fun = 'receive_{pack}'.format(pack=pack)
             if hasattr(receiver, rcv_fun):
@@ -68,15 +68,24 @@ class DataProvider(metaclass=DataProviderMeta):
                 if callable(rcv_fun_obj):
                     self.receivers[pack].append(receiver)
 
-                if hasattr(rcv_fun_obj, '_requires'):
-                    for p in rcv_fun_obj._requires:
-                        if pack_order[p] > pack_order[pack]:
-                            pack_order[p], pack_order[pack] = pack_order[pack], pack_order[p]
-
-
     def distribute(self, pack, *args, **kwargs):
         for r in self.receivers[pack]:
             getattr(r, 'receive_{pack}'.format(pack=pack))(*args, **kwargs)
+
+    def _run_hook(self, pack):
+        met_name = pack_hooks[pack]
+        met_obj = getattr(self, met_name)
+        if not pack in self._packs_run and len(self.receivers[pack]) > 0:
+            ep_debug('*** Running pack hook', pack)
+            for r in self.receivers[pack]:
+                rcv_fun_obj = getattr(r, 'receive_{pack}'.format(pack=pack))
+                if hasattr(rcv_fun_obj, '_requires'):
+                    for p in rcv_fun_obj._requires:
+                        ep_debug('*** Resolving dependency ', p)
+                        self._run_hook(p)
+
+            met_obj()
+            self._packs_run.append(pack)
 
     def run(self):
         receivers = set([r for p in self.receivers.values() for r in p])
@@ -84,11 +93,8 @@ class DataProvider(metaclass=DataProviderMeta):
             if hasattr(r, 'setup') and callable(r.setup):
                 r.setup()
 
-        for pack, rank in sorted(pack_order.items(), key=lambda x: x[1]):
-        # for pack, method_name in pack_hooks.items():
-            method_name = pack_hooks[pack]
-            if len(self.receivers[pack]) > 0:
-                getattr(self, method_name)()
+        for pack in pack_hooks:
+            self._run_hook(pack)
 
         for r in receivers:
             if hasattr(r, 'finalize') and callable(r.finalize):

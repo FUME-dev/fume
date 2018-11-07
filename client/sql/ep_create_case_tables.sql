@@ -33,9 +33,9 @@ CREATE TABLE if not exists "{case_schema}"."ep_intersect_factors" (
 -- cache for precalculated time zone shifts
 create table if not exists "{case_schema}"."ep_time_zone_shifts" (
     tz_id integer,
-    time_loc timestamp,
     time_out timestamptz,
-    primary key (tz_id, time_loc)
+    time_loc timestamp,
+    primary key (tz_id, time_out)
 );
 
 -- cache for precalculated time factors
@@ -132,6 +132,18 @@ create unlogged table if not exists "{case_schema}"."ep_sg_emissions_spec" (
   foreign key (sg_id) references "{case_schema}"."ep_sources_grid"
 );
 
+create unlogged table if not exists "{case_schema}"."ep_grid_emissions_spec" (
+  grid_id BIGINT,
+  spec_id INTEGER,
+  cat_id BIGINT,
+  k INTEGER,
+  emiss FLOAT,
+  primary key (grid_id, spec_id, cat_id),
+  foreign key (spec_id) references "{case_schema}"."ep_out_species",
+  foreign key (cat_id) references "{conf_schema}"."ep_emission_categories",
+  foreign key (grid_id) references "{case_schema}"."ep_grid_tz"
+);
+
 -- emissions in grid after speciation and time disaggregation
 create unlogged table if not exists "{case_schema}"."ep_sg_out_emissions" (
   sg_id bigint,
@@ -218,6 +230,11 @@ create table if not exists "{case_schema}"."ep_met_data" (
 -- FIXME get_species is used in the context of both total emissions and area emissions
 CREATE VIEW "{case_schema}".get_species AS
     SELECT DISTINCT em.spec_id, spec.name FROM "{case_schema}".ep_sg_emissions_spec AS em
+           INNER JOIN "{case_schema}".ep_out_species AS spec ON em.spec_id=spec.spec_id
+           ORDER BY em.spec_id;
+
+CREATE VIEW "{case_schema}".get_species_agg AS
+    SELECT DISTINCT em.spec_id, spec.name FROM "{case_schema}".ep_grid_emissions_spec AS em
            INNER JOIN "{case_schema}".ep_out_species AS spec ON em.spec_id=spec.spec_id
            ORDER BY em.spec_id;
 

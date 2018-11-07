@@ -37,6 +37,9 @@ class CMAQWriter(DataReceiver):
     """
 
     def setup(self, filename):
+        filepath=os.path.dirname(os.path.abspath(filename))
+        if not os.path.exists(filepath):
+            os.makedirs(filepath)
         self.outfile = Dataset(filename, 'w', format='NETCDF4')
         self.outfile.createDimension('TSTEP', None)
         self.outfile.createDimension('DATE-TIME', 2)
@@ -159,14 +162,18 @@ class CMAQPointWriter(CMAQWriter):
         # At the first time step create the NetCDF variables.
         # We need to wait till here to make sure we know all dimensions
 
-        if len(self.outvars) == 0:
+        if not ('VAR' in self.outfile.dimensions.keys()):
             self.outfile.createDimension('VAR', len(self.species))
+
+        #if len(self.outvars) == 0:
+        if not ('TFLAG' in self.outfile.variables.keys()):
             self.timevar = self.outfile.createVariable('TFLAG', 'i4', ('TSTEP', 'VAR', 'DATE-TIME'))
             self.timevar.units = '<YYYYDDD,HHMMSS>'
             self.timevar.long_name = 'FLAG           '
             self.timevar.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
 
-            for specid, specname in self.species:
+        for specid, specname in self.species:
+            if not (specname in self.outfile.variables.keys()):
                 emisvar = self.outfile.createVariable(specname, 'f4', ('TSTEP', 'LAY', 'ROW', 'COL'))
                 emisvar.long_name = long_object_name(specname)
                 emisvar.units = 'moles/s for gases and  g/s for aerosols'
@@ -186,6 +193,9 @@ class CMAQPointWriter(CMAQWriter):
     def receive_stack_params(self, stacks):
         self.point_src_params = stacks
         self.numstk = self.point_src_params.shape[0]
+        if self.numstk == 0:
+            return
+
         self.stacks_id = list(map(int,self.point_src_params[:,0]))
 
         numtimes = len(self.rt_cfg['run']['datestimes'])

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib
 
@@ -103,6 +104,9 @@ class EmissPlot():
         if hasattr(self.cfg.postproc.emissplotter, 'colorbar') and self.cfg.postproc.emissplotter.colorbar.lower() in ('horizontal', 'vertical'):
             cbar = plt.colorbar(orientation=self.cfg.postproc.emissplotter.colorbar.lower())
 
+        filepath=os.path.dirname(os.path.abspath(filename))
+        if not os.path.exists(filepath):
+            os.makedirs(filepath)
         plt.savefig(filename, dpi=self.file_resolution)
         try:
             cbar.remove()

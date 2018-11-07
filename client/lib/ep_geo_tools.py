@@ -469,7 +469,6 @@ def vert_interp(field0,zht0,zht,mpoints=True):
                 j = 1
                 while (j <= nz0-1) and (zht0[j] < zht[i]):
                     j += 1
-                print('j',j)
                 if zht0[j] >= zht[i]:
                     fieldi[i] = field0i[j-1] + ( field0i[j] - field0i[j-1] ) * ( zht[i] - zht0[j-1] ) / (zht0[j] - zht0[j-1] )
                 else:

@@ -54,7 +54,7 @@ Prerequisities:
 
 Other libraries for python
 
-* pip, pyproj, psycopg2, pygrib, netcdf4, gdal, pint, configobj, scipy, pytz, numpy
+* pip, pyproj, psycopg2, pygrib, netcdf4, gdal, pint, configobj, scipy, pytz, numpy, python-cdo
 
 Optional libraries for plotting (only necessary when EmissPlotter postprocessors are used)
 
@@ -67,7 +67,14 @@ Some of the python packages mentioned above may not be present depending on dist
 
     pip install configobj
     zypper install python3-psycopg2
-    
+
+~~~
+
+If using the anaconda distribution, it may be necessary to use conda-forge:
+
+~~~
+
+    conda install -c conda-forge pygrib pint gdal
 ~~~
 
 
@@ -127,6 +134,10 @@ If not already started, start (possibly as root) the postgres sql server
 
 systemctl start postgresql
 
+~~~
+or possibly with version number:
+~~~
+systemctl start postgresql-9.6
 ~~~
 
 Create database:

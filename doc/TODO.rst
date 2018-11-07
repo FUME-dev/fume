@@ -8,10 +8,6 @@ Grid
 ====
 - unregular grid (polygons) and create_grid = no not working, (moreover nx, dx etc still have to be in config file although they no meaning in case of create_grid = no)
 
-Merging data from external models
-=================================
-not working when no other emissions were generated
-
 Emission import
 ===============
 

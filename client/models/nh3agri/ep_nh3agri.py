@@ -24,19 +24,19 @@ cat = [
 'Emise drůbež hnůj ulož - bod',  
 'Emise drůbež hnůj do OP' ] 
 # v databazy - cislovani od 1
-#       0  1 | Skot dojený     | P
-#       1  2 | Skot nedojený   | A
-#       2  3 | Skot nezařazený | A
-#       3  4 | Ovce            | A
-#       4  5 | Kozy            | A                                                       
-#       5  6 | Prasata         | A
-#       6  7 | Drůbež          | P           
+#       0  1 | Skot dojený     
+#       1  2 | Skot nedojený   
+#       2  3 | Skot nezařazený 
+#       3  4 | Ovce            
+#       4  5 | Kozy                                                                   
+#       5  6 | Prasata         
+#       6  7 | Drůbež                     
 #
 
 cat_map_to_animals = [ # orna puda = 0, trava = 1, hnuj = 2
 (0,2),
 (0,2),
-(0,2),
+(0,0),
 (1,1),
 (2,1),
 (3,1),
@@ -44,8 +44,8 @@ cat_map_to_animals = [ # orna puda = 0, trava = 1, hnuj = 2
 (5,2),
 (5,2),
 (5,0),
-(6,0),
-(6,0),
+(6,2),
+(6,2),
 (6,0) ]
 numcat = len(cat)
 
@@ -173,7 +173,7 @@ def run_nh3agri(cfg):
         q = str.format('SELECT tz.i, tz.j, act.act_unit_id, act.cat_id, act.act_intensity  FROM "{case_schema}".ep_sg_activity_data act JOIN "{case_schema}".ep_sources_grid USING(sg_id) JOIN "{case_schema}".ep_grid_tz tz  USING(grid_id); ', case_schema=case_schema)
         cur.execute(q)
         for row in cur.fetchall():
-            animals2d[row[0]-1, row[1]-1,row[2]-1,row[3]-10000001] = row[4]
+            animals2d[row[0]-1, row[1]-1,row[2]-1,row[3]-10000001] += row[4]
 
 
     #2) get meteorology
@@ -183,9 +183,9 @@ def run_nh3agri(cfg):
     for t in range(len(ep_datetimes)):
         for d in ep_rtcfg['met'][t]:
             if d.name == 'tas': # we need just a subset of all the meteorology
-                temp[:,:,t] = d.data-273.15
+                temp[:,:,t] = d.data[:,:,0]-273.15
             if d.name == 'wndspd10m':
-                wind[:,:,t] = d.data
+                wind[:,:,t] = d.data[:,:,0]
 
 
 #3) calculate the actual emissions values
@@ -214,6 +214,14 @@ def run_nh3agri(cfg):
         nh3time[:] = date2num([i.replace(tzinfo=None) for i in ep_datetimes] ,units=nh3time.units,calendar=nh3time.calendar)
         nh3 = nh3group.createVariable('NH3','f4',('time','ny','nx'))
         nh3.units = 'mol/s'
+
+        if cfg.write_met:
+            nh3_met_tas     =  nh3group.createVariable('tas','f4',('time','ny','nx'))
+            nh3_met_wind10m =  nh3group.createVariable('wind10m','f4',('time','ny','nx'))
+            nh3_met_tas[:]  = temp[:,:,:].transpose(2,1,0)
+            nh3_met_wind10m[:] = wind[:,:,:].transpose(2,1,0)
+
+
         nh3[:]  = nh3emis.transpose(2,1,0) / (3600. * nh3mol) # mol/s
         animals= ['Skot_doj','Skot_nedoj','Skot_nezar','Ovce','Kozy','Prasata', 'Drubez']
         animalgrp = []

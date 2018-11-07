@@ -27,10 +27,10 @@ def preproc(cfg):
     megan_input_dir = cfg.megan_input_dir
     megan_temp_dir = cfg.megan_temp_dir
     megan_out_dir = cfg.megan_out_dir
-    file_lai = cfg.megan_lai
-    file_pft = cfg.megan_pft
-    files_ef = cfg.megan_ef
-    file_sltyp = cfg.megan_sltyp
+    file_lai = os.path.join(megan_input_dir,cfg.megan_lai)
+    file_pft = os.path.join(megan_input_dir, cfg.megan_pft)
+    files_ef = [ os.path.join(megan_input_dir,f) for f in cfg.megan_ef ]
+    file_sltyp = os.path.join(megan_input_dir,cfg.megan_sltyp)
 
     cdt = datetime.now()
 
@@ -50,11 +50,14 @@ def preproc(cfg):
     gdf = megan_temp_dir+'/cdo_griddesc_case'
     m3gdf = megan_temp_dir+'/GRIDDESC'
     case_lons,case_lats = grid_desc(ep_cfg,cdo_griddesc_file=gdf,m3_griddesc_file=m3gdf)
-
+    
     try:
-        pftgrp = Dataset(megan_input_dir+'/'+file_pft,'r+')
+        from shutil import copy2
+        copy2(file_pft, os.path.join(megan_temp_dir,'megan_pft.nc'))
+        file_pft = os.path.join(megan_temp_dir,'megan_pft.nc')
+        pftgrp = Dataset(file_pft,'r+')
     except IOError:
-        print('EE: Error opening megan input dataset. Check path {}!'.format(megan_input_dir))
+        print('EE: Error opening megan pft dataset. Check input and temp paths: {}, {}!'.format(megan_input_dir,file_pft))
         raise IOError
 
 
@@ -99,9 +102,14 @@ def preproc(cfg):
     ep_debug('II: remapping megan input to the case grid')
     cdo = Cdo()
     for f,v in zip(files, meganivars):
-        fp = os.path.join(megan_input_dir,f)
-        tmpremapped = cdo.remapbil(gdf,input = fp, output = None, returnArray = v)
-        remapped.append(tmpremapped)
+        ep_debug('II: remapping {}'.format(v))
+        if meganivars != 'SLTYP':        
+            tmpremapped = cdo.remapbil(gdf,input = f, output = None, returnArray = v)
+            remapped.append(tmpremapped)
+        else:
+            tmpremapped = cdo.remaplaf(gdf,input = f, output = None, returnArray = v)
+            remapped.append(tmpremapped)
+
         
  
        
@@ -583,9 +591,9 @@ def met_write_megan_met(cfg):
             if d.name in _required_met: # we need just a subset of all the meteorology
                 iv = megan_fields.index(megan_mapping[d.name])
                 if d.name != 'pr24':
-                    megan_met_var[iv][t, 0, :, :] = d.data.transpose(1,0)
+                    megan_met_var[iv][t, 0, :, :] = d.data[:,:,0].transpose(1,0)
                 else:
-                    megan_met_var[iv][t, 0, :, :] = d.data.transpose(1,0)/10. #.reshape((ny,nx))/10.0 # units are cm not mm
+                    megan_met_var[iv][t, 0, :, :] = d.data[:,:,0].transpose(1,0)/10. #.reshape((ny,nx))/10.0 # units are cm not mm
         
 
     # fill in precip adjustment factor, for now, value 1
@@ -751,7 +759,7 @@ def megan_run(cfg):
     megan_out_file =  os.path.join(megan_out_dir,cfg.megan_out)
 
     os.environ["MGNOUT"] = megan_out_file
-    ep_debug('Executing MEGAN emproc')    
+    ep_debug('Executing MEGAN emproc: {}'.format(exe))    
     call(['time',exe])
 
 
@@ -763,8 +771,8 @@ def megan_run(cfg):
     os.environ["SPCTONHR"] = "N"
 
     exe = os.path.join(mgnexe, 'mgn2mech')
-    ep_debug('Executing MEGAN mgn2mech')
-
+    ep_debug('Executing MEGAN mgn2mech: {}'.format(exe))
+    
     call(['time', exe])
 
 

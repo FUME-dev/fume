@@ -183,7 +183,7 @@ class ep_met_data():
 
     def __init__(self, name, npdata):
         self.name = name
-        self.data = npdata
+        self.data = npdata.copy()
 
     def __mul__(self,x):
         newdata = self.data * x    
@@ -293,11 +293,7 @@ def met_interp(met_data):
                 points_met[ii][0] = xorg_met+i*dx_met+dx_met/2-nx_met*dx_met/2
                 points_met[ii][1] = yorg_met+j*dx_met+dx_met/2-ny_met*dx_met/2
                 ii += 1    
-
-
-
-
-        
+    
         points_case     = np.empty((nx * ny,2),dtype=float)
 
         ii = 0
@@ -321,14 +317,20 @@ def met_interp(met_data):
     
     met_data_i = []
     for d in met_data[:]:
-        values = d.data[:,:,0]
-        values = values.flatten(order='C')
+        nzz = d.data.shape[2]
+        data_i_3d = np.empty((nx, ny, nzz), dtype=float)
+        for i in range(nzz):
+            values = d.data[:,:,i]
+            values = values.flatten(order='C')
+            ep_debug('II: ep_met.ep_interp: regridding for {}.'.format(d.name))
+            data_i = interpolate(values, vtx, wts)
+            if ep_cfg.input_params.met.met_type == 'WRF':
+                data_i_3d[:,:,i] = data_i.reshape((ny, nx), order = 'F').transpose(1,0)
+            else:
+                data_i_3d[:,:,i] = data_i.reshape((ny, nx), order = 'C').transpose(1,0)
 
-        ep_debug('II: ep_met.ep_interp: regridding for {}.'.format(d.name))
-        data_i = interpolate(values, vtx, wts)
 
-        data_i = data_i.reshape((ny, nx), order = 'C').transpose(1,0)
-        met_data_i.append(ep_met_data(d.name, data_i))
+        met_data_i.append(ep_met_data(d.name, data_i_3d))
     return(met_data_i)
 
 def met_export_grid():
@@ -383,7 +385,6 @@ def met_get_be_datestimes(infilename, filetype, endian='big'):
     if isinstance(infilename, str):
     ## opening the file
         if filetype == 'MCIP' or filetype == 'WRF' or filetype == 'RegCM':
-            # print(infilename)
             inf = Dataset(infile, 'r', format='NETCDF4')
         
         elif filetype == 'CAMx':

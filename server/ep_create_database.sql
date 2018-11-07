@@ -9,7 +9,8 @@ select * from information_schema."information_schema_catalog_name";
 \i ep_case_proc.sql;
 \i ep_timezones.sql;
 \i ep_process_sources.sql;
-\i ep_emission_output.sql
+\i ep_emission_output.sql;
+\i ep_utility.sql;
 commit;
 
 

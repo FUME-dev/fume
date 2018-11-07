@@ -79,7 +79,7 @@ def init_static(path=None, conf_schema=None, static_schema=None):
 
         # speciation profiles
         filename = os.path.join(path, 'speciations', 'speciation_profiles.csv')
-        fieldnames = ['cat_id', 'inv_specie', 'chem_comp_id', 'percentage']
+        fieldnames = ['cat_id', 'inv_specie', 'chem_comp_id', 'fraction']
         foreign_key = [('inv_specie', 'ep_in_species', 'name', 'spec_in_id')]
         ep_csv2table(ep_connection, filename, conf_schema, 'ep_comp_cat_profiles', fieldnames, foreign_key, naval='#N/A')
 

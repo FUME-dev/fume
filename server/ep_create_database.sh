@@ -48,6 +48,7 @@ psql -d $dbname -c "create extension postgis_topology;"
 psql -d $dbname -c "create extension intarray;"
 psql -d $dbname -c "grant all on database \"$dbname\" to \"emisproc\" with grant option;"
 psql -d $dbname -c "grant all on spatial_ref_sys to \"emisproc\";"
+psql -d $dbname -c "grant all on spatial_ref_sys_srid_seq to \"emisproc\";"
 
 echo "Database $dbname has been created and postgis has been enabled in it."
 echo "Connect to the database as user $username and run script ep_create_database.sql."

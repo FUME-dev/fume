@@ -89,7 +89,6 @@ def prepare_conf():
     ep_projection_params()
     ep_create_grid()
     ep_dates_times()
-    ep_debug(ep_rtcfg['projection_params'])
 
 
 def collect_meteorology():
@@ -108,7 +107,7 @@ def collect_meteorology():
 def process_case_spec_time():
     """
     Main case procedure:
-    
+
     - import meteorology data
     - calculate speciation splits & apply
     - calculate time dissaggregation factors
@@ -131,12 +130,20 @@ def process_case_spec_time():
     time_start = ep_cfg.run_params.time_params.dt_init.replace(tzinfo=tzone_out)
     interval = ep_cfg.run_params.time_params.num_time_int
     timestep = timedelta(seconds=ep_cfg.run_params.time_params.timestep)
+    ep_debug('ep_calc_emiss_time_series:', time_start, timestep, interval,
+             itzone_out, conf_schema, case_schema)
     cur.callproc('ep_calc_emiss_time_series', [time_start, timestep, interval,
-                                               itzone_out, conf_schema, case_schema])
+                                               itzone_out, conf_schema,
+                                               case_schema])
     ep_connection.commit()
 
     # Proceed with speciation profiles
-    cur.callproc('ep_apply_spec_factors', [conf_schema, case_schema])
+    if ep_cfg.run_params.aggregate_speciated_emissions:
+        cur.callproc('ep_apply_spec_factors_aggregate', [conf_schema,
+                                                         case_schema])
+    else:
+        cur.callproc('ep_apply_spec_factors', [conf_schema, case_schema])
+
     ep_connection.commit()
 
     # Time series will be calculated in output module
@@ -206,13 +213,14 @@ def preproc_external_models():
         try:
             func_obj = getattr(mod['obj'], 'preproc')
         except AttributeError:
+            print('WW: No preproc function defined in model {}, skipping...'.format(mod['name']))
             continue
 
         try:
             ep_debug('Running model "{}" preprocessing'.format(mod['name']))
             func_obj(mod['conf'])
         except:
-            print('EE: Error prerocessing the model {}. Check if it is correctly configured and have all the neccesary inputs'.format(mod['name']))
+            print('EE: Error preprocessing the model {}. Check if it is correctly configured and have all the neccesary inputs'.format(mod['name']))
             raise
 
 
@@ -225,7 +233,7 @@ def run_external_models():
         try:
             func_obj = getattr(mod['obj'], 'run')
         except AttributeError:
-            print('WW: No run_{m} function defined in model {m}, skipping...')
+            print('WW: No run function defined in model {}, skipping...'.format(mod['name']))
             continue
 
         try:

@@ -59,11 +59,11 @@ def ep_create_schema(schema, init_file=None, srid=None):
 
     # create a new schema for case
     if ep_cfg.scratch and schema not in ep_rtcfg['db']['schemas_initialized']:
-        ep_debug('DROP SCHEMA IF EXISTS "{}" CASCADE'.format(schema))
+        #ep_debug('DROP SCHEMA IF EXISTS "{}" CASCADE'.format(schema))
         cur.execute('DROP SCHEMA IF EXISTS "{}" CASCADE'.format(schema))
 
     sqltext = 'CREATE SCHEMA IF NOT EXISTS "{}"'.format(schema)
-    ep_debug(sqltext)
+    #ep_debug(sqltext)
     cur.execute(sqltext)
 
     # grant schema privileges
@@ -79,7 +79,7 @@ def ep_create_schema(schema, init_file=None, srid=None):
                 sqltext = schema_sql.read().format(**ep_cfg.db_connection.all_schemas)
             else:
                 sqltext = schema_sql.read().format(srid=srid, **ep_cfg.db_connection.all_schemas)
-            print('Execute SQL command: ', sqltext)
+            #print('Execute SQL command: ', sqltext)
             cur.execute(sqltext)
             ep_connection.commit()
 
@@ -333,20 +333,39 @@ def combine_2_emis(em1,spec1,em2,spec2): # function to combine emissions from ep
             emisout[:,:,0:kz2,i] += em2[:,:,0:kz2,j]
     return(emisout, spec)
 
-def combine_model_emis(em,sp,t):
-    try:
-        emtmp,sptmp = em,sp
-        for m in ep_rtcfg['external_model_data']:
-            specmodel = ep_rtcfg['external_model_data'][m]['species']
-            emismodel = ep_rtcfg['external_model_data'][m]['data'][:,:,:,t,:]
-            emtmp,sptmp = combine_2_emis(emtmp,sptmp,emismodel,specmodel)
-        return(emtmp,sptmp)
-    except KeyError:
-        return(em,sp)
+def combine_model_emis(em,sp,t,noanthrop = False):
+    
+    if noanthrop == False:
+        try:
+            emtmp,sptmp = em,sp
+            for m in ep_rtcfg['external_model_data']:
+                specmodel = ep_rtcfg['external_model_data'][m]['species']
+                emismodel = ep_rtcfg['external_model_data'][m]['data'][:,:,:,t,:]
+                emtmp,sptmp = combine_2_emis(emtmp,sptmp,emismodel,specmodel)
+            return(emtmp,sptmp)
+        except KeyError:
+            return(em,sp)
+    else:
+        try:
+            m = ep_rtcfg['external_model_data'].keys()[0]
+            sptmp = ep_rtcfg['external_model_data'][m]['species']
+            emtmp = ep_rtcfg['external_model_data'][m]['data'][:,:,:,t,:]
+            # combine with the rest
+            if len(ep_rtcfg['external_model_data'].keys()) > 1:
+                for m in ep_rtcfg['external_model_data'].keys()[1:]:
+                    specmodel = ep_rtcfg['external_model_data'][m]['species']
+                    emismodel = ep_rtcfg['external_model_data'][m]['data'][:,:,:,t,:]
+                    emtmp,sptmp = combine_2_emis(emtmp,sptmp,emismodel,specmodel)
+            return(emtmp,sptmp)
+        except KeyError:
+            raise('EE: Fatal error. No anthropogenic emissions, no external model emissions. No output to write.')
+
+
 
 
 def combine_model_spec(spec):
     # spec - spec list from FUME
+    
     try:
         sptmp = spec
         sptmp =  [s[1] for s in spec]

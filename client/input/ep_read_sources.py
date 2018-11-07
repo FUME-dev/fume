@@ -207,15 +207,16 @@ def ep_process_raw_geometries(con, schema, gset_table, gset_id, config):
         sqltext = 'WITH g AS( ' \
                   ' SELECT {0}, min(geom_orig_id) AS min_geom_orig_id ' \
                   '  FROM "{1}"."{2}" ' \
+                  '  {4} ' \
                   '  GROUP BY {0} ' \
                   ') UPDATE "{1}"."{2}" u ' \
                   '    SET geom_orig_id = g.min_geom_orig_id ' \
                   '    FROM g {3}' \
-                  .format(s1, schema, gset_table, s2)
+                  .format(s1, schema, gset_table, s2, sqlcond)
 
         ep_debug("Normalize geometry inputs: {}".format(sqltext))
         cur = con.cursor()
-        cur.execute(sqltext, cond_vals)
+        cur.execute(sqltext, cond_vals*2)
         #for notice in con.notices:
         #    print(notice)
         con.commit()

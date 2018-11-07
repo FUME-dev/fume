@@ -74,10 +74,10 @@ begin
     for i in 1 .. nx loop
         for j in 1 .. ny loop
             --raise notice 'Add gridbox i,j = %,%', i, j;
-            xmin = xo+dx*(i-1-nx/2);
-            xmax = xo+dx*(i-nx/2);
-            ymin = yo+dy*(j-1-ny/2);
-            ymax = yo+dy*(j-ny/2);
+            xmin = xo+dx*(i-1-nx/2.0);
+            xmax = xo+dx*(i-nx/2.0);
+            ymin = yo+dy*(j-1-ny/2.0);
+            ymax = yo+dy*(j-ny/2.0);
             geomtext = format('POLYGON((%s %s, %s %s, %s %s, %s %s, %s %s))',
                        xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax, xmin, ymin);
             --raise notice 'geomtext=%', geomtext;

@@ -147,7 +147,7 @@ create table if not exists "{conf_schema}"."ep_comp_cat_profiles" (
       cat_id bigint,      -- source category id
       spec_in_id int,     -- id of the input specie which should be speciated by this profile
       chem_comp_id int,   -- chemical compound identifier
-      percentage real not null,   -- weight percentage of specie in profile
+      fraction real not null,   -- weight fraction of specie in profile
       --primary key (cat_id, spec_in_id, chem_comp_id),
       foreign key (cat_id) references "{conf_schema}"."ep_emission_categories",
       foreign key (spec_in_id) references "{conf_schema}"."ep_in_species",

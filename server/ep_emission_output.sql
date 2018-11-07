@@ -1,4 +1,4 @@
-﻿CREATE EXTENSION intarray;
+﻿CREATE EXTENSION IF NOT EXISTS intarray;
 
 DROP FUNCTION IF EXISTS ep_total_emissions(integer,integer,integer,integer[],text);
  
@@ -39,7 +39,7 @@ begin
 END;
 $ep_total_emissions$ LANGUAGE plpgsql;
 
-DROP FUNCTION IF EXISTS ep_emiss_time_series(integer,integer,integer,integer[],timestamptz,text,boolean);
+DROP FUNCTION IF EXISTS ep_emiss_time_series(integer,integer,integer,integer[],timestamptz,text,boolean,boolean);
  
 CREATE OR REPLACE FUNCTION ep_emiss_time_series(
     nx INTEGER,
@@ -48,7 +48,8 @@ CREATE OR REPLACE FUNCTION ep_emiss_time_series(
     spec INTEGER[],
     t TIMESTAMPTZ,
     case_schema TEXT DEFAULT 'case',
-    save_to_db BOOLEAN DEFAULT false)
+    save_to_db BOOLEAN DEFAULT false,
+    from_aggregated BOOLEAN DEFAULT false)
     RETURNS FLOAT[][][][] AS 
 $ep_emiss_time_series$
 DECLARE
@@ -60,28 +61,45 @@ DECLARE
     s INTEGER;
     e FLOAT;
     pos INTEGER;
+    sql TEXT;
 begin
     nspec = icount(spec);
     -- prepare a zero array that will be filled up (time is not in dimension, this function will be called for each timestep)
     emis = ARRAY_FILL(0.0::FLOAT, ARRAY[nx,ny,nz,nspec]);
     
-    FOR i, j, k, s, e IN
-       EXECUTE  FORMAT('SELECT i, j, k, em.spec_id s, sum(em.emiss*t.tv_factor) e 
-                        FROM %I.ep_sg_emissions_spec em 
-                        JOIN %I.ep_time_factors t USING(cat_id) 
-                        JOIN %I.ep_sources_grid sg USING(sg_id) 
-                        JOIN %I.ep_grid_tz g USING(grid_id) 
-                        JOIN %I.ep_time_zone_shifts s USING (tz_id, time_loc) 
-                        WHERE s.time_out = $1 AND sg.source_type IN (''A'', ''L'')  
-                        GROUP BY i, j, k, em.spec_id', 
-                        case_schema, case_schema, case_schema, case_schema, case_schema) USING t
+    IF from_aggregated THEN
+       sql = FORMAT('SELECT i, j, em.k, em.spec_id s, sum(em.emiss*t.tv_factor) e 
+                     FROM %I.ep_grid_emissions_spec em 
+                     JOIN %I.ep_time_factors t USING(cat_id) 
+                     JOIN %I.ep_grid_tz g USING(grid_id) 
+                     JOIN %I.ep_time_zone_shifts s USING (tz_id, time_loc) 
+                     WHERE s.time_out = $1
+                     GROUP BY i, j, em.k, em.spec_id', 
+                     case_schema, case_schema, case_schema, case_schema);
+    ELSE
+       sql = FORMAT('SELECT i, j, k, em.spec_id s, sum(em.emiss*t.tv_factor) e 
+                     FROM %I.ep_sg_emissions_spec em 
+                     JOIN %I.ep_time_factors t USING(cat_id) 
+                     JOIN %I.ep_sources_grid sg USING(sg_id) 
+                     JOIN %I.ep_grid_tz g USING(grid_id) 
+                     JOIN %I.ep_time_zone_shifts s USING (tz_id, time_loc) 
+                     WHERE s.time_out = $1 AND sg.source_type IN (''A'', ''L'')  
+                     GROUP BY i, j, k, em.spec_id', 
+                     case_schema, case_schema, case_schema, case_schema, case_schema);
+    END IF;
+
+    FOR i, j, k, s, e IN EXECUTE sql USING t
     LOOP
         pos = idx(spec, s);
+        raise notice '%', s ;
+        raise notice '%', spec;
         emis[i][j][k][pos] = e;
     END LOOP;
+
     IF save_to_db THEN
         EXECUTE FORMAT('INSERT INTO %I.ep_out_emissions_array (time_out, emissions) VALUES ($1, $2)', case_schema) USING t, emis;
     END IF;
+
     RETURN emis;
 END;
 $ep_emiss_time_series$ LANGUAGE plpgsql;

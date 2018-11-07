@@ -47,7 +47,6 @@ def import_sources(path=None, source_schema=None):
 
     # read sources with emission data
     inv_file = ep_cfg.input_params.emission_inventories
-    print(inv_file)
     if os.path.exists(inv_file):
         ep_read_sources(inv_file, path, source_schema, conf_schema, 'emission')
     else:
@@ -85,7 +84,6 @@ def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
         lines = list(reader)
 
     for line in lines:
-        print(line)
         try:
             inv_name = line[0]
         except IndexError:
@@ -130,7 +128,6 @@ def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
             # get config from the info file
             file_info = line[3]
             ifile = os.path.join(path, file_info)
-            print(ifile)
             if os.path.exists(ifile):
                 config = ConfigFile(ifile, confspec_file).values()
             else:
@@ -172,7 +169,7 @@ def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
                     # process raw geometries
                     ep_process_raw_geometries(ep_connection, source_schema, file_table, gset_id, gconfig)
                 #
-                ep_debug('Geomtery set {} imported as ID {}.'.format(gset_name, gset_id))
+                ep_debug('Geometry set {} imported as ID {}.'.format(gset_name, gset_id))
 
             # register new file
             file_id = ep_register_source_file(file_name, inv_id, file_path, file_table, file_info, gset_id, source_schema)
@@ -357,7 +354,6 @@ def ep_read_calculate_pollutants_file(path, schema, conf_schema):
                         elif len(sterm) == 2:
                             coef = float(opers[idx] + sterm[0])
                             input = sterm[1]
-
                         cur.execute('SELECT spec_in_id FROM "{}".ep_in_species WHERE name = %s'.format(conf_schema), (input,))
                         input_id = cur.fetchone()[0]
 
