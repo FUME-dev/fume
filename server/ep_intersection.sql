@@ -1,4 +1,27 @@
-﻿--drop function ep_intersection(text,text,text,text,text,text);
+﻿/*
+Description: It creates ep_intersection FUME sql function.
+*/
+
+/*
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+*/
+
+--drop function ep_intersection(text,text,text,text,text,text);
 
 /*********************************************************************
 * This function creates intersects of table1 and table2
@@ -25,6 +48,7 @@ create or replace function ep_intersection (
     idi text,
     geomcoli text,
     coefi text,
+    normaliz boolean,
     createtable boolean,
     tempi boolean)
     returns boolean as
@@ -66,6 +90,8 @@ declare
     sqldim text;
     sqlfields1 text;
     sqlcond1 text;
+    sqlnorma text;
+    sqlnorml text;
 
     rec1 text[];
     rec2 text[];
@@ -76,6 +102,7 @@ declare
     ci double precision;
 
 begin
+    raise notice 'ep_intersection: %, %, %, %, %, %, %, %, %, %, %, %, %, %, %, %, %', schema1,table1,fields1,coef1,schema2,table2,fields2,coef2,schemai,tablei,sridi,idi,geomcoli,coefi,normaliz,createtable,tempi;
     -- construct table full names
     if schema1 = '' then
         tablename1 = format('%I',table1);
@@ -220,7 +247,8 @@ begin
     end if;
 
     -- intersect geometry
-    sqltext = sqltext ||' ST_Intersection('||sqltrans1||','||sqltrans2||') ';
+    sqltext = sqltext ||' ST_Multi(ST_CollectionExtract(ST_Intersection('||sqltrans1||','||sqltrans2||'), 
+    least(ST_Dimension('||sqltrans1||')+1, ST_Dimension('||sqltrans2||')+1))) ';
 
     -- field values
     foreach field in array fields1
@@ -245,30 +273,41 @@ begin
         end if;
         -- dimmension of geometry
         sqldim = format('ST_Dimension(t1.%I)', geomcol1);
+        -- normalization formulas
+        if normaliz then
+          sqlnorma = '/ST_Area('||sqltrans1||')';
+          sqlnorml = '/ST_Length('||sqltrans1||')';
+        else
+          sqlnorma = '';
+          sqlnorml = '';
+        end if;
 
-        -- coefi calsulation
-        sqltext = sqltext ||
-            ', CASE
-                 WHEN '||sqldim||' = 2 THEN
-                   CASE
-                     WHEN ST_Area('||sqltrans1||') > 0 THEN
-                       ST_Area(ST_Intersection('||sqltrans1||','||sqltrans2||'))/ST_Area('||sqltrans1||')'||sqlcoef||'
-                     ELSE
-                       0.0
-                     END
-                 WHEN '||sqldim||' = 1 THEN
-                   CASE
-                     WHEN ST_Length('||sqltrans1||') > 0 THEN
-                       ST_Length(ST_Intersection('||sqltrans1||','||sqltrans2||'))/ST_Length('||sqltrans1||')'||sqlcoef||'
-                     ELSE
-                       0.0
-                   END
-                 ELSE 1.0'||sqlcoef||'
-            END ';
+        -- coefi calculation
+            sqltext = sqltext ||
+                ', CASE
+                     WHEN '||sqldim||' = 2 THEN
+                       CASE
+                         WHEN ST_Area('||sqltrans1||') > 0 THEN
+                       ST_Area(ST_Intersection('||sqltrans1||','||sqltrans2||'))'||sqlnorma||sqlcoef||'
+                         ELSE
+                           0.0
+                         END
+                     WHEN '||sqldim||' = 1 THEN
+                       CASE
+                         WHEN ST_Length('||sqltrans1||') > 0 THEN
+                       ST_Length(ST_Intersection('||sqltrans1||','||sqltrans2||'))'||sqlnorml||sqlcoef||'
+                         ELSE
+                           0.0
+                       END
+                     ELSE 1.0'||sqlcoef||'
+                   END ';
     end if;
 
     sqltext = sqltext || ' FROM ' || tablename1 || ' AS t1 ';
-    sqltext = sqltext || ' JOIN ' || tablename2 || ' AS t2 ON ST_Intersects('||sqltrans1||','||sqltrans2||')';
+    sqltext = sqltext || ' JOIN ' || tablename2 || ' AS t2 ';
+    sqltext = sqltext || ' ON ST_IsValid('||sqltrans1||') and ST_Intersects('||sqltrans1||','||sqltrans2||')';
+    sqltext = sqltext || ' where ST_Dimension(ST_Multi(ST_Intersection('||sqltrans1||','||sqltrans2||'))) = ';
+    sqltext = sqltext || ' least(ST_Dimension('||sqltrans1||'), ST_Dimension('||sqltrans2||'))';
 
     raise notice 'Intersect: %', sqltext;
     execute sqltext;

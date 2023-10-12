@@ -1,8 +1,31 @@
-drop function if exists ep_case_timezones(text,text,text,text,text,text,integer);
+/*
+Description: It creates ep_case_timezones FUME sql function.
+*/
+
+/*
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+*/
+
+drop function if exists ep_case_timezones(text,text,text,text,text,text,text,text,integer);
 
 /***************************************************************
 * This function creates and fills out the table
-* tz_table (usually ep_timezones) for case tz_schema
+* tz_table (usually ep_timezones) in schema case_schema
 * it imports/creates only needed country/generic timezones
 ***************************************************************/
 create or replace function ep_case_timezones (
@@ -10,8 +33,10 @@ create or replace function ep_case_timezones (
     grid_table text,
     tz_world_schema text,
     tz_world_table text,
-    tz_schema text,
+    case_schema text,
     tz_table text,
+    grid_env_table text,
+    grid_timezone text,
     srid integer )
     returns boolean as
 $$
@@ -67,41 +92,48 @@ begin
                       tz_id serial,
                       tz_name text not null,
                       geom geometry(multipolygon, %L),
+                      ts_id integer,
                       primary key (tz_id)
-                     )', tz_schema, tz_table, srid);
+                     )', case_schema, tz_table, srid);
 --   raise notice 'Point2';
     -- create geom index
     execute format('create index if not exists %I on %I.%I using gist(geom)',
-                    tz_table||'_geom', tz_schema, tz_table);
+                    tz_table||'_geom', case_schema, tz_table);
     --execute format('create index if not exists %I on %I.%I using gist(geom)',
-     --               tz_table||'_geom', tz_schema, tz_table);
+     --               tz_table||'_geom', case_schema, tz_table);
 --   raise notice 'Point3';
     -- delete possible old rows
-    execute format('delete from %I.%I', tz_schema, tz_table);
--- execute format('select count(*) from %I.%I', tz_schema, tz_table) into izp;
+    execute format('delete from %I.%I', case_schema, tz_table);
+-- execute format('select count(*) from %I.%I', case_schema, tz_table) into izp;
 --   raise notice 'Point4 %', izp;
 
-    -- calculate domain bounding box
-    execute format('select ST_Multi(ST_ConvexHull(ST_Collect(geom))) from %I.%I', grid_schema, grid_table)
+    -- read domain envelope
+    execute format('select geom from %I.%I', case_schema, grid_env_table)
         into domainpoly;
---   raise notice 'Point 4a % %', ST_AsText(domainpoly), ST_SRID(domainpoly);
-
---    execute format('select min(ST_XMin("geom")), max(ST_XMax("geom")), min(ST_YMin("geom")), max(ST_YMax("geom"))
---                      from %I.%I', grid_schema, grid_table)
---        into xmin, xmax, ymin, ymax;
---  raise notice 'Point5';
---    domainpoly = format('POLYGON((%s %s, %s %s, %s %s, %s %s, %s %s ))',
---                     xmin, ymin, xmin, ymax, xmax, ymax, xmax, ymin, xmin, ymin);
---  raise notice 'Point6 %', domainpoly;
+    raise notice 'ep_grid_env: %.%, geometry: %', case_schema, grid_env_table, domainpoly;
 
     -- import relevant country data from tz_world_mp and transform into case srid
     -- and cut to domain extend
-    execute format(
-             'insert into %I.%I (tz_id, tz_name, geom)
-                select "gid", "tz_id", ST_Multi(ST_Intersection(ST_Transform("geom",%s),%L)) from %I.%I
-                  where "tz_id" <> %L and
-                        ST_Intersects(ST_Transform(geom,%s), %L)',
-           tz_schema,tz_table, srid, domainpoly, tz_world_schema, tz_world_table, 'uninhabited', srid, domainpoly);
+    if grid_timezone <> '' then
+        -- all domain lies in one existing domain
+        raise notice 'All grid belongs to one prescribed timezone %', grid_timezone;
+        sqltext = format('insert into %I.%I (tz_id, tz_name, geom, ts_id)
+                     select "gid", "tz_id", ST_Multi(ST_CollectionExtract(ST_Intersection(ST_Transform("geom",%s),%L), 3)), 0 from %I.%I
+                     where "tz_id" = %L and ST_IsValid(ST_Transform("geom",%s))',
+                  case_schema,tz_table, srid, domainpoly, tz_world_schema, tz_world_table, grid_timezone, srid);
+        raise notice 'sqltext = %', sqltext;
+        execute sqltext;
+        return true;
+    end if;
+
+    -- general case of more timezones in domain
+    raise notice 'No prescribed grid timezone - creating intersection with "%"."%"', tz_world_schema, tz_world_table;
+    sqltext = format('insert into %I.%I (tz_id, tz_name, geom, ts_id)
+                 select "gid", "tz_id", ST_Multi(ST_CollectionExtract(ST_Intersection(ST_Transform("geom",%s),%L), 3)), 0 from %I.%I
+                 where "tz_id" <> %L and ST_IsValid(ST_Transform("geom",%s)) and ST_Intersects(ST_Transform(geom,%s), %L)',
+              case_schema,tz_table, srid, domainpoly, tz_world_schema, tz_world_table, 'uninhabited', srid, srid, domainpoly);
+    raise notice 'sqltext = %', sqltext;
+    execute sqltext;
            --ST_Intersects(ST_Transform(geom,%L),ST_PolygonFromText(%L,%L))
 --   raise notice 'Point7';
     -- create generic timezones for
@@ -113,7 +145,7 @@ begin
 --  raise notice 'Point8 %, %, %, %', lonmin, lonmax, latmin, latmax;
 
     -- 2. create union allcountries geometry
-    execute format('select ST_Union(array(select geom from %I.%I))', tz_schema, tz_table)
+    execute format('select ST_Union(array(select geom from %I.%I))', case_schema, tz_table)
         into allcountries;
 --  raise notice 'Point9 % ', allcountries;
 
@@ -210,21 +242,17 @@ begin
                 if izp = 0 then
                     tzname = 'UTC';
                 else
-                    tzname = 'UTC'||trim(to_char(izp,tzformat));
+                    tzname = 'UTC'||trim(to_char(-izp,tzformat));
                 end if;
-                execute format('insert into %I.%I (tz_id, tz_name, geom) values ( %L, %L, %L )', tz_schema, tz_table, izp+1000, tzname, geomp2);
+                execute format('insert into %I.%I (tz_id, tz_name, geom) values ( %L, %L, %L )', case_schema, tz_table, izp+1000, tzname, geomp2);
             end if;
         end loop;
     end loop;
 
-
-
 return true;
-
 
 end
 $$
 language plpgsql volatile
 cost 100;
-commit;
 

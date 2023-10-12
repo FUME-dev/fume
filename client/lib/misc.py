@@ -1,14 +1,40 @@
+"""
+Description: miscellaneous helper functions
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as mpl_polygon 
 import shapely.geometry as sh_geom
 from fiona import collection
-from lib.ep_libutil import ep_debug
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
+
 
 def get_polygons_from_file(infilename):
     try:
         infile = collection(infilename, 'r')
     except IOError:
-        ep_debug('No such file or directory: ', infilename)
+        log.debug('No such file or directory: ', infilename)
         return []
     return [sh_geom.shape(g['geometry']) for g in infile]
 

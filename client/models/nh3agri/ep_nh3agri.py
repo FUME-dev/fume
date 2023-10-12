@@ -1,13 +1,34 @@
-import numpy as np
+"""
+Description:
 
-from os import path
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
+import numpy as np
 from lib.ep_config import ep_cfg
-from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_connection, ep_create_schema, ep_debug 
+from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_connection, ep_create_schema
 from datetime import datetime, timedelta
 from netCDF4 import Dataset, num2date,date2num
 
 _required_met = [ 'tas', 'wndspd10m']
-
 
 cat = [
 'Emise dojnice stáj - bod', 
@@ -276,7 +297,5 @@ def annualintegral(cat,metf):
 if __name__ == '__main__':
     import sys
     fname = str(sys.argv[1])
-    print(fname)
     for i in range(len(cat_emis)):
         Ef = cat_emis[i]/annualintegral(i,fname)
-        print(Ef)

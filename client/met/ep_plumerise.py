@@ -1,17 +1,28 @@
-#!/usr/bin/env python3
+"""
+Description: Functions:
+  plumerise: calculates plume rise
+  get_plume_frac: calculates plume depth and factors for each layer for how much of the emissions it receives
+"""
 
-""" functions:
-        plumerise: calculates plume rise
-        get_plume_frac: calculates plume depth and factors for each layer for how much of the emissions it receives
-"""     
+"""
+This file is part of the FUME emission model.
 
-__author__ = "Peter Huszar"
-__license__ = "GPL"
-__version__ = "1.0beta"
-__maintainer__ = "Peter Huszar"
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-import sys
-import os
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
 import numpy as np
 
 p0 = 1000.
@@ -20,28 +31,30 @@ grav = 9.81
 
 
 def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
-# as in CAMx v6.30 20160408
-#
-#     PLUMERIS calculates plume rise above a given elevated point source.
-#     Methodology based on the EPA TUPOS Gaussian Plume Model
-#     (Turner, Chico, and Catalano, 1986)
-#
-#     Modifications: 
-#        04/07/10       Various updates to improve robustness
-#
-#     Input arguments:
-#        nlay                number of layers
-#        hght                layer interface heights (m)
-#        temp                temperature (K)
-#        press               pressure (hPa = mb)
-#        wind                total horizontal wind (m/s)
-#        hstk                stack height (m)
-#        dstk                stack diameter (m)
-#        tstk                stack temperature (K)
-#        vstk                stack velocity (m/s)
-#
-#     Output arguments:
-#        prise               plume rise (m)
+    """
+    As in CAMx v6.30 20160408
+
+    PLUMERIS calculates plume rise above a given elevated point source.
+    Methodology based on the EPA TUPOS Gaussian Plume Model
+    (Turner, Chico, and Catalano, 1986)
+
+    Modifications: 
+       04/07/10       Various updates to improve robustness
+
+    Input arguments:
+       nlay                number of layers
+       hght                layer interface heights (m)
+       temp                temperature (K)
+       press               pressure (hPa = mb)
+       wind                total horizontal wind (m/s)
+       hstk                stack height (m)
+       dstk                stack diameter (m)
+       tstk                stack temperature (K)
+       vstk                stack velocity (m/s)
+
+    Output arguments:
+       prise               plume rise (m)
+    """
 
     lfirst = True
     rise = 0.
@@ -62,7 +75,6 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
             dtdz[k] = dtheta/dz
         else:
             dtdz[k] = dtdz[k-1]
-
 
 # Find beginning layer; determine vertical coordinates relative
 #     to stack-top 
@@ -93,7 +105,6 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
 #minimum windspeed profile: 1 m/s
     for k  in range(1,nlay):
         wind[k] = max(wind[k],1.)
-    
 
 # Neutral-unstable conditions for momentum rise and stack buoyancy flux
 
@@ -109,8 +120,6 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         
     bflux0 = grav*vstk*dstk*dstk*(stkt - temp[kstk])/(4.*stkt)
     bflux = bflux0
-          
-     
 
 #  Top of layer loop; determine stability
 
@@ -127,7 +136,6 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         if (dtdz[kstab] > 1.5e-3):
             if (zstab  == 0.):
                 zstab = max(zbot,1.)
-#           goto 30
         else:
             ubrise1 = 30.*(bflux/wind[kstk])**0.6 + zbot
             ubrise2 = 24.*(bflux/wind[kstk]**3)**0.6 * (hstk + 200.*(bflux/wind[kstk]**3))**0.4 + zbot
@@ -161,10 +169,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
 
             lfirst = False
 
-# mylabel 30
-
-
-#Stable buoyancy rise
+# Stable buoyancy rise
 
         sbrise1 = (1.8*bflux*temp[kstk]/(wind[kstk]*dtdz[kstab]) +  zbot*zbot*zbot)**(1./3.)
         sbrise2 = (4.1*bflux*temp[kstk]/(bflux0**(1./3.)*dtdz[kstab]) + zbot**(8./3.))**(3./8.)
@@ -173,7 +178,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         if (sbrise == sbrise2):
             iuse = 2
 
-#Stable momentum rise
+# Stable momentum rise
         if (lfirst):
             smrise = 0.646*(vstk**2*dstk**2/(stkt*wind[kstk]))**(1./3.) * sqrt(temp[kstk])/(dtdz[kstab]**(1./6.))
             if (smrise > ztop):
@@ -206,8 +211,6 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         else:
             rise = sbrise
 
-
-
 # Stable residual buoyancy flux
 
         if ( iuse == 1 ):
@@ -223,16 +226,15 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
    
         lfirst = False
 
-
-    
     prise = hstk + dwfact*rise
 
     return prise
-#########################################################################################################################
-# This routine calculates the fraction of emission each layer receives
 
 
 def get_plume_frac(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
+    """
+    Calculate the fraction of emission each layer receives.
+    """
     pfrac = np.zeros(nlay+1,dtype = np.float )
     prise = plumerise(nlay,hght,temp,press,wind,hstk,dstk,tstk,vstk,zstk)
     k = 1
@@ -278,8 +280,5 @@ def get_plume_frac(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         bot = max(hght[k-1],zbot)
         top = min(hght[k],ztop)
         pfrac[k] = (top - bot)/pwidth
-
-
-
 
     return pfrac

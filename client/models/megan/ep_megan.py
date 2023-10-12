@@ -1,36 +1,49 @@
-#!/usr/bin/env python3
+"""
+Description: FUME module to create MEGAN emissions.
+1) It prepares the megan LAI/PFT/EF inputs
+2) It imports the meteorological conditions from different models and produces MEGAN met inputs
+3) It calls MEGANv2.10 binaries emsproc and mgn2mech to write MEGAN output netcdf
+"""
 
-__author__ = "Peter Huszar"
-__license__ = "GPL"
-__email__ = "huszarpet@gmail.com"
+"""
+This file is part of the FUME emission model.
 
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
 
 import os
 import numpy as np
-import pyproj
-from netCDF4 import Dataset, num2date
+from netCDF4 import Dataset
 from datetime import *
 from subprocess import call
-
 from lib.ep_config import ep_cfg
-
-from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_connection, ep_create_schema, ep_debug, ep_dates_times
-from cdo import *
+from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_connection, ep_create_schema, ep_dates_times
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
 from input.ep_read_sources import ep_read_raw_netcdf, ep_get_source_file_id, ep_register_source_file, ep_get_eset_id
 
 _required_met = [ 'soim1', 'soit1', 'tas', 'ps', 'qas', 'wndspd10m', 'pr24', 'par']
 
 def preproc(cfg):
+    """Megan preprocessing from external data for LAI, PFT and EF)"""
 
-    # alternative interpolation routine - done in python on the client side (not using Postgis)
-
-    megan_input_dir = cfg.megan_input_dir
-    megan_temp_dir = cfg.megan_temp_dir
-    megan_out_dir = cfg.megan_out_dir
-    file_lai = os.path.join(megan_input_dir,cfg.megan_lai)
-    file_pft = os.path.join(megan_input_dir, cfg.megan_pft)
-    files_ef = [ os.path.join(megan_input_dir,f) for f in cfg.megan_ef ]
-    file_sltyp = os.path.join(megan_input_dir,cfg.megan_sltyp)
+    file_lai = os.path.join(cfg.megan_input_data_dir,cfg.megan_lai)
+    file_pft = os.path.join(cfg.megan_input_data_dir, cfg.megan_pft)
+    files_ef = [ os.path.join(cfg.megan_input_data_dir,f) for f in cfg.megan_ef ]
+    file_sltyp = os.path.join(cfg.megan_input_data_dir,cfg.megan_sltyp)
 
     cdt = datetime.now()
 
@@ -45,21 +58,15 @@ def preproc(cfg):
     cdate= cyyyy*1000+cjjj
     ctime= chh*10000 + cmin * 100 + css
 
-
     from lib.ep_geo_tools import grid_desc
-    gdf = megan_temp_dir+'/cdo_griddesc_case'
-    m3gdf = megan_temp_dir+'/GRIDDESC'
+    # used for remapping with cdo
+    gdf = os.path.join(cfg.megan_input_dir,'cdo_griddesc_case')
+    m3gdf = os.path.join(cfg.megan_input_dir,cfg.megan_in_griddesc)
     case_lons,case_lats = grid_desc(ep_cfg,cdo_griddesc_file=gdf,m3_griddesc_file=m3gdf)
-    
-    try:
-        from shutil import copy2
-        copy2(file_pft, os.path.join(megan_temp_dir,'megan_pft.nc'))
-        file_pft = os.path.join(megan_temp_dir,'megan_pft.nc')
-        pftgrp = Dataset(file_pft,'r+')
-    except IOError:
-        print('EE: Error opening megan pft dataset. Check input and temp paths: {}, {}!'.format(megan_input_dir,file_pft))
-        raise IOError
 
+
+    # this concern the default data provided along with FUME for MEGAN preprocessing.
+    pftgrp = Dataset(file_pft,'r+')
 
 #   pft file has unconventional naming for lat, lon and for attributes. CDO is unable to determine the grid.
 #   should be:
@@ -74,13 +81,10 @@ def preproc(cfg):
     except KeyError:
         pass
 
-    try:
-        pftgrp.variables['lon'].units='degrees_east'
-        pftgrp.variables['lat'].units='degrees_north'
-        pftgrp.variables['lon'].long_name='coordinate longitude'
-        pftgrp.variables['lat'].long_name='coordinate latitude'
-    except: # FIXME
-        pass
+    pftgrp.variables['lon'].units='degrees_east'
+    pftgrp.variables['lat'].units='degrees_north'
+    pftgrp.variables['lon'].long_name='coordinate longitude'
+    pftgrp.variables['lat'].long_name='coordinate latitude'
 
     pftgrp.close()
 
@@ -99,22 +103,19 @@ def preproc(cfg):
     meganivars.append('SLTYP')
     remapped = []
     
-    ep_debug('II: remapping megan input to the case grid')
+    log.debug('II: remapping megan input to the case grid')
+    from cdo import Cdo
     cdo = Cdo()
     for f,v in zip(files, meganivars):
-        ep_debug('II: remapping {}'.format(v))
+        log.fmt_debug('II: remapping {}', v)
         if meganivars != 'SLTYP':        
             tmpremapped = cdo.remapbil(gdf,input = f, output = None, returnArray = v)
             remapped.append(tmpremapped)
         else:
             tmpremapped = cdo.remaplaf(gdf,input = f, output = None, returnArray = v)
             remapped.append(tmpremapped)
-
-        
- 
        
 ########### take the interpolated data and write to MEGAN IO/API files
-
        
     proj  = ep_rtcfg['projection_params']['proj']
     p_alp = ep_rtcfg['projection_params']['p_alp']
@@ -145,7 +146,7 @@ def preproc(cfg):
         iproj = 5
         GDTYP = 3
     else:
-        print("EE: projection not known. Exit.....")
+        log.error("EE: projection not known. Exit.....")
         raise ValueError
 
     # domain parameters
@@ -165,12 +166,12 @@ def preproc(cfg):
 
     # open output files (LAI, PFT, EFs)
     try:
-        megan_lai = Dataset(megan_temp_dir+'/'+'megan_in_lai.nc','w',format='NETCDF3_CLASSIC')
-        megan_pft = Dataset(megan_temp_dir+'/'+'megan_in_pft.nc','w',format='NETCDF3_CLASSIC')
-        megan_EF =  Dataset(megan_temp_dir+'/'+'megan_in_EF.nc','w',format='NETCDF3_CLASSIC')
-        megan_SLTYP = Dataset(megan_temp_dir+'/'+'megan_in_SLTYP.nc','w',format='NETCDF3_CLASSIC')
+        megan_lai = Dataset(os.path.join(cfg.megan_input_dir, cfg.megan_in_lai),'w',format='NETCDF3_CLASSIC')
+        megan_pft = Dataset(os.path.join(cfg.megan_input_dir, cfg.megan_in_pft),'w',format='NETCDF3_CLASSIC')
+        megan_EF =  Dataset(os.path.join(cfg.megan_input_dir, cfg.megan_in_ef),'w',format='NETCDF3_CLASSIC')
+        megan_SLTYP = Dataset(os.path.join(cfg.megan_input_dir, cfg.megan_in_sltyp),'w',format='NETCDF3_CLASSIC')
     except IOError:
-        print('EE: Error while opening megan input files. Check paths: {}!'.format(megan_temp_dir))
+        log.fmt_error('EE: Error while opening megan input files. Check path: {}!', cfg.megan_input_dir)
         raise
 
     # creating dimensions
@@ -199,8 +200,6 @@ def preproc(cfg):
     megan_SLTYP.createDimension('ROW', ny)
     megan_SLTYP.createDimension('COL', nx)
 
-
-
     # time specific data
     tflag_lai = megan_lai.createVariable('TFLAG', 'i4', ('TSTEP', 'VAR', 'DATE-TIME'))
     tflag_lai.units = '<YYYYDDD,HHMMSS>'
@@ -216,7 +215,6 @@ def preproc(cfg):
     tflag_EF.units = '<YYYYDDD,HHMMSS>'
     tflag_EF.long_name = 'FLAG            '  # length = 15
     tflag_EF.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
-
 
     datestimes = ep_dates_times()
     ntimeint = len(datestimes)
@@ -246,7 +244,6 @@ def preproc(cfg):
         tflag_lai[t, :, 1] = (t-24)*10000
 
 
-
     tflag_pft[:,0,0] = np.int32(0)
     tflag_pft[:,0,1] = np.arange(0,16)*10000 #btime[0]
 
@@ -264,7 +261,6 @@ def preproc(cfg):
     fields_pft.units = "nondimension    "
     fields_pft.var_desc = ""
 
-
     fields_SLTYP = megan_SLTYP.createVariable('SLTYP','f4', ('ROW','COL'))
 
     EF_fields = ['LAT','LONG','DTEMP','DSRAD','EF_ISOP','EF_MYRC','EF_SABI','EF_LIMO','EF_A_3CAR','EF_OCIM','EF_BPIN','EF_APIN','EF_OMTP','EF_FARN','EF_BCAR','EF_OSQT','EF_MBO','EF_MEOH','EF_ACTO','EF_CO','EF_NO','EF_BIDER','EF_STRESS','EF_OTHER']
@@ -276,7 +272,6 @@ def preproc(cfg):
         EF_fields_o[i].long_name = EF_fields[i].ljust(16)
         EF_fields_o[i].units = ""
         EF_fields_o[i].var_desc = ""
-
 
 
     EF_fields_o[0].units = "DEGREE          " 
@@ -326,7 +321,6 @@ def preproc(cfg):
     fields_pft[14, 0, :, :] = remapped[-2][15, :, :]  # CROP
     fields_pft[15, 0, :, :] = remapped[-2][16, :, :]  # CORN
 
-
     fields_SLTYP[:] = remapped[-1].transpose(1,0)
     megan_SLTYP.close()
     # write global attributes
@@ -338,7 +332,6 @@ def preproc(cfg):
         grp.FTYPE=np.int32(1)
         grp.SDATE=np.int32(bdate[0])
         grp.STIME=np.int32(btime[0])
-
 
         dt  =  ep_cfg.run_params.time_params.timestep
         dt_hh = dt // 3600
@@ -373,7 +366,7 @@ def preproc(cfg):
         grp.GDNAM = '{0:16s}'.format(grid_name)
         grp.NTHIK = np.int32(1)
         grp.HISTORY = ""
-        grp.FILEDESC = "Created by EP                                                                                                                                                   "
+        grp.FILEDESC = "Created by FUME                                                                                                                                                 "
 
 ###############
     megan_EF.TSTEP = np.int32(0)
@@ -402,22 +395,19 @@ def preproc(cfg):
 
     setattr(megan_EF,'VAR-LIST', ''.join(longfldname))
 
-    
-
 
 #############################################################################
 # write MEGAN met input header - this does not write the data itself
 #############################################################################
 def met_write_megan_met(cfg):
+    """Preparation of MEGAN specific meteorological input file."""
 
-    megan_temp_dir = cfg.megan_temp_dir
-
-    megan_met_file = os.path.join(megan_temp_dir,cfg.megan_met)
+    megan_met_file = os.path.join(cfg.megan_input_dir,cfg.megan_in_met)
     try:
         megangrp = Dataset(megan_met_file,'w',format='NETCDF3_CLASSIC')
         ep_rtcfg['megangrp'] = megangrp
     except IOError:
-        print('EE: Error while opening {}. Check paths!'.format(megan_met_file))
+        log.fmt_error('EE: Error while opening {}. Check paths!', megan_met_file)
         raise
 
     proj  = ep_rtcfg['projection_params']['proj']
@@ -449,7 +439,7 @@ def met_write_megan_met(cfg):
         iproj = 5
         GDTYP = 3
     else:
-        print("EE: projection not known. Exit.....")
+        log.error("EE: projection not known. Exit.....")
         raise ValueError
 
     # domain parameters
@@ -468,8 +458,8 @@ def met_write_megan_met(cfg):
     itzone_out = ep_cfg.run_params.time_params.itzone_out
     tdelta = ep_cfg.run_params.time_params.timestep
 
-    VGTYP  = 1   #ep_cfg.run_params.output_params.CMAQ_params.VGTYP
-    VGTOP  = 0.0 #ep_cfg.run_params.output_params.CMAQ_params.VGTOP
+    VGTYP  = 1   
+    VGTOP  = 0.0 
     VGLVLS = 0.0,0.0
 
 
@@ -508,14 +498,14 @@ def met_write_megan_met(cfg):
 
     megan_fields = ['SOIM1','SOIT1','SLTYP','TEMP2','PRES','QV','WINDSPD','RAIN_ACC24','PREC_ADJ','PAR']
     megan_mapping = {
-    'soim1': 'SOIM1',
-    'soit1': 'SOIT1',
-    'tas': 'TEMP2',
-    'ps': 'PRES',
-    'qas': 'QV',
-    'wndspd10m' :  'WINDSPD',
-    'pr24': 'RAIN_ACC24',  # FIXME
-    'par' : 'PAR'
+        'soim1': 'SOIM1',
+        'soit1': 'SOIT1',
+        'tas': 'TEMP2',
+        'ps': 'PRES',
+        'qas': 'QV',
+        'wndspd10m' :  'WINDSPD',
+        'pr24': 'RAIN_ACC24',
+        'par' : 'PAR'
     }
     numfld = len(megan_fields)
     # field units and description
@@ -554,8 +544,6 @@ def met_write_megan_met(cfg):
 
     longfldname = [ '{0:16s}'.format(megan_fields[f]) for f in range(numfld) ]
 
-
-
     megangrp.createDimension('TSTEP', None)
     megangrp.createDimension('DATE-TIME', 2)
     megangrp.createDimension('LAY', 1)
@@ -568,11 +556,9 @@ def met_write_megan_met(cfg):
     tflag.long_name = 'FLAG            ' # length = 15
     tflag.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
 
-
     for t in range(ntimeint):
         tflag[t,:,0] = bdate[t]
         tflag[t,:,1] = btime[t]
-
 
     fields = list(megan_mapping.keys())
 
@@ -584,25 +570,26 @@ def met_write_megan_met(cfg):
         field.var_desc = megan_desc[f]
         megan_met_var.append(field)
 
-
-        
     for t in range(len(datestimes)):
         for d in ep_rtcfg['met'][t]:
             if d.name in _required_met: # we need just a subset of all the meteorology
                 iv = megan_fields.index(megan_mapping[d.name])
-                if d.name != 'pr24':
-                    megan_met_var[iv][t, 0, :, :] = d.data[:,:,0].transpose(1,0)
+                if d.name == 'soit1' or d.name == 'soim1':
+                    megan_met_var[iv][t, 0, :, :] = d.data[:].transpose(1,0)
+                elif d.name != 'pr24':
+                    if d.name == 'qas' or d.name == 'qa':
+                        megan_met_var[iv][t, 0, :, :] = (d.data[:]/(1-d.data[:])).transpose(1,0) 
+                    else:
+                        megan_met_var[iv][t, 0, :, :] = d.data[:].transpose(1,0)
                 else:
-                    megan_met_var[iv][t, 0, :, :] = d.data[:,:,0].transpose(1,0)/10. #.reshape((ny,nx))/10.0 # units are cm not mm
+                    megan_met_var[iv][t, 0, :, :] = d.data[:].transpose(1,0)/10. #.reshape((ny,nx))/10.0 # units are cm not mm
         
-
     # fill in precip adjustment factor, for now, value 1
 
     iv = megan_fields.index('PREC_ADJ')
     megan_met_var[iv][:] = 1.
 
-
-    megan_SLTYP = Dataset(megan_temp_dir+'/'+'megan_in_SLTYP.nc','r')
+    megan_SLTYP = Dataset(os.path.join(cfg.megan_input_dir,cfg.megan_in_sltyp),'r')
 
     iv = megan_fields.index('SLTYP')
     for t in range(len(datestimes)):
@@ -656,52 +643,9 @@ def met_write_megan_met(cfg):
 
 
 def megan_run(cfg):
+    """Main megan module routine which calls MEGAN binaries emsproc and mgn2mech"""
     
-    # set enviromental variables
-    mgnhome = cfg.megan_base_dir
-    megan_temp_dir = cfg.megan_temp_dir
     megan_out_dir  = cfg.megan_out_dir 
-
-    os.environ["MGNHOME"] = mgnhome
-    mgnsrc = os.path.join(mgnhome, 'src')
-    mgnlib = os.path.join(mgnhome, 'lib')
-    mgnexe = os.path.join(mgnhome, 'bin')
-    mgnrun = os.path.join(mgnhome, 'work')
-    mgninp = os.path.join(mgnhome, 'Input')
-    mgnout = os.path.join(mgnhome, 'Output')
-    mgnint = os.path.join(mgnhome, 'Output/INT')
-    mgnlog = os.path.join(mgnhome, 'work/logdir')
-
-    os.environ["MGNSRC"] = mgnsrc
-    os.environ["MGNLIB"] = mgnlib
-    os.environ["MGNEXE"] = mgnexe
-    os.environ["MGNRUN"] = mgnrun
-    os.environ["MGNINP"] = mgninp
-    os.environ["MGNOUT"] = mgnout
-    os.environ["MGNINT"] = mgnint
-    os.environ["MGNLOG"] = mgnlog
-
-
-
-    if not os.path.isdir(mgninp):
-        os.mkdir(os.path.join(mgninp, 'MAP'))
-        os.mkdir(os.path.join(mgninp, 'MGNMET'))
-        os.mkdir(os.path.join(mgninp, 'PAR'))
-
-    if not os.path.isdir(mgnint):
-        os.mkdir(mgnint)
-    if not os.path.isdir(mgnlog):
-        os.mkdir(mgnlog)
-
-    # emisproc
-    # set emisproc evnironmental variables
-    os.environ["PRJ"]  = ep_cfg.casename
-    os.environ["PROMPTFLAG"]  = 'Y'
-    exe = os.path.join(mgnexe, 'emproc')
-    os.environ["INPDIR"]  = os.path.join(mgninp,'MAP')
-    os.environ["METDIR"]  = os.path.join(mgninp,'MGNMET')
-    os.environ["INTDIR"]  = mgnint
-    os.environ["OUTDIR"]  = mgnout
 
     datestimes = ep_dates_times()
     byyyy = datestimes[0].year
@@ -710,7 +654,6 @@ def megan_run(cfg):
     
     yearstart_date = datetime(byyyy, 1, 1, tzinfo = datestimes[0].tzinfo)
     bjjj = (datestimes[0] - yearstart_date).days + 1
-    
 
     sdate = str(byyyy*1000 + bjjj)
 
@@ -721,7 +664,6 @@ def megan_run(cfg):
     stime = str(bhh*10000 + bmin * 100 + bss)
     os.environ["STIME"] = stime
 
-
     ntimeint = len(datestimes)
     dtl = ntimeint * ep_cfg.run_params.time_params.timestep
     dtl_hh = dtl // 3600
@@ -729,7 +671,6 @@ def megan_run(cfg):
     dtl_min = dtl_tmp // 60
     dtl_ss  = dtl_tmp % 60
     rleng  = str(dtl_hh*10000+dtl_min * 100 + dtl_ss)
-
 
     dt = ep_cfg.run_params.time_params.timestep
     dt_hh = dt // 3600
@@ -740,28 +681,23 @@ def megan_run(cfg):
     os.environ["RLENG"] = rleng 
     os.environ["TSTEP"] = tstep
 
-
     os.environ["RUN_MEGAN"] = 'Y'
     os.environ["ONLN_DT"] = 'Y'
     os.environ["ONLN_DS"] = 'Y'
-    os.environ["GRIDDESC"] = os.path.join(megan_temp_dir,'GRIDDESC')
+    os.environ["GRIDDESC"] = os.path.join(cfg.megan_input_dir,cfg.megan_in_griddesc)
     os.environ["GDNAM3D"] = ep_cfg.domain.grid_name
     os.environ["PROMPTFLAG"] = "Y"
 
-    os.environ["EFMAPS"] = os.path.join(megan_temp_dir,'megan_in_EF.nc')
-    os.environ["PFTS16"] = os.path.join(megan_temp_dir,'megan_in_pft.nc')
-    os.environ["LAIS46"] = os.path.join(megan_temp_dir,'megan_in_lai.nc')
+    os.environ["EFMAPS"] = os.path.join(cfg.megan_input_dir,cfg.megan_in_ef)
+    os.environ["PFTS16"] = os.path.join(cfg.megan_input_dir,cfg.megan_in_pft)
+    os.environ["LAIS46"] = os.path.join(cfg.megan_input_dir,cfg.megan_in_lai)
+    os.environ["MGNMET"] = os.path.join(cfg.megan_input_dir,cfg.megan_in_met)
 
-    os.environ["MGNMET"] = os.path.join(megan_temp_dir,cfg.megan_met)
+    os.environ["MGNERS"] = os.path.join(cfg.megan_out_dir, cfg.megan_out_er)
+    os.environ["MGNOUT"] = os.path.join(cfg.megan_out_dir, cfg.megan_out)
 
-
-    os.environ["MGNERS"] = os.path.join(megan_temp_dir,'megan_er.nc')
-    megan_out_file =  os.path.join(megan_out_dir,cfg.megan_out)
-
-    os.environ["MGNOUT"] = megan_out_file
-    ep_debug('Executing MEGAN emproc: {}'.format(exe))    
-    call(['time',exe])
-
+    log.fmt_debug('Executing MEGAN emproc: {}', cfg.megan_emproc_exe)    
+    call(['time', cfg.megan_emproc_exe])
 
     # Run speciation and mechanism conversion
        
@@ -770,39 +706,92 @@ def megan_run(cfg):
     os.environ["RUN_CONVERSION"] = "Y"
     os.environ["SPCTONHR"] = "N"
 
-    exe = os.path.join(mgnexe, 'mgn2mech')
-    ep_debug('Executing MEGAN mgn2mech: {}'.format(exe))
-    
-    call(['time', exe])
+    log.fmt_debug('Executing MEGAN mgn2mech: {}', cfg.megan_mgn2mech_exe)
+    call(['time', cfg.megan_mgn2mech_exe])
 
-
-    if cfg.merge_emis: # save emission into rt_cfg
+    if cfg.megan_merge_emis: # save emission into rt_cfg
         if 'external_model_data' not in ep_rtcfg.keys():
             ep_rtcfg['external_model_data'] = {}
 
-        m = Dataset(megan_out_file,'r')
+        m = Dataset(os.path.join(cfg.megan_out_dir, cfg.megan_out),'r')
         megan_species = getattr(m,'VAR-LIST').split()
         megan_species.remove('GDAY')
         numspec_megan = len(megan_species)
+	    # map megan species to model species according to conf_schema.ep_sp_mod_specie_mapping 
+        with ep_connection.cursor() as cur:
+            # get model and mechanism ids
+            conf_schema = ep_cfg.db_connection.conf_schema
+            cur.execute('SELECT model_id FROM "{conf_schema}".ep_aq_models WHERE name = %s and version = %s'.format(conf_schema=conf_schema), (ep_cfg.run_params.output_params.model, ep_cfg.run_params.output_params.model_version))
+            model_id = cur.fetchone()[0]
+            chem_mechanisms = ep_cfg.run_params.speciation_params.chem_mechanisms
+            sqltext = 'SELECT mech_id FROM "{conf_schema}".ep_mechanisms WHERE '.format(conf_schema=conf_schema) + ' OR '.join(len(chem_mechanisms) * ['name = %s'])
+            cur.execute(sqltext, tuple(chem_mechanisms))
+            mech_ids = cur.fetchall()
+            # get mapping table
+            sqltext = 'SELECT spec_sp_name, spec_mod_name, map_fact from "{conf_schema}".ep_sp_mod_specie_mapping WHERE model_id = %s AND '.format(conf_schema=conf_schema)
+            sqltext = sqltext + '(' + ' OR '.join(len(mech_ids) * ['mech_id = %s']) + ')'
+            cur.execute(sqltext, tuple([model_id] + [mech_id[0] for mech_id in mech_ids]))    
+            # save the mapping table
+            sp_mod_mapping = np.array(cur.fetchall()) # numrow x 3 ???
+
+        try:
+            nummap = sp_mod_mapping.shape[0]
+            mapped_species = sp_mod_mapping[:,0]
+            mapped_to_species = sp_mod_mapping[:,1]
+            mapping_factors = sp_mod_mapping[:,2].astype(float)
+        except IndexError:
+            nummap = 0
+            mapped_species = []
+            mapped_to_species = []
+            mapping_factors = []
+        megan_species_model_tmp = megan_species_model = []
+        for s in megan_species:
+            if s not in mapped_species:
+                megan_species_model_tmp.append(s)
+            else:
+                idxs = np.where(mapped_species == s)
+                for idx in np.nditer(idxs): 
+                    megan_species_model_tmp.append(mapped_to_species[idx])
+        # remove duplicates
+        for s in megan_species_model_tmp:
+            if s not in megan_species_model:
+                megan_species_model.append(s)
+
+        log.fmt_debug('Model species from megan species: {}', megan_species_model)
+        num_sp_mod = len(megan_species_model)
+
         nx = ep_cfg.domain.nx
         ny = ep_cfg.domain.ny
         emis_megan = np.zeros((nx,ny,1,ntimeint, numspec_megan),dtype=float)
+        emis_megan_model = np.zeros((nx,ny,1,ntimeint, num_sp_mod),dtype=float)
+
+        # for the original megan array
         for i in range(numspec_megan):
             emis_megan[:,:,0,:,i] = m.variables[megan_species[i]][:,0,:,:].transpose(2,1,0)
 
-        ep_rtcfg['external_model_data']['megan'] = { 'data' : emis_megan, 'species' : megan_species }
+        # first "map" species without explicit mapping (i.e. implicit 1-1 mapping)
+        for i,s in enumerate(megan_species):
+            if s not in mapped_species:
+                emis_megan_model[:,:,0,:,megan_species_model.index(s)] = emis_megan[:,:,0,:,i]
+                
+        # map species with mapping, for this iterate trough the mapping table
+        for i in range(nummap):
+            if mapped_to_species[i] in megan_species_model:
+                emis_megan_model[:,:,0,:,megan_species_model.index(mapped_to_species[i])] += emis_megan[:,:,0,:,megan_species.index(mapped_species[i])] * mapping_factors[i]
+
+        ep_rtcfg['external_model_data']['megan'] = { 'data' : emis_megan_model, 'species' : megan_species_model }
+
 
 def ep_megan_data_import(cfg, ext_mod_id):
-
     case_schema = ep_cfg.db_connection.case_schema
 
     meg_table = 'ep_raw_megan_emissions'
 
-    meg_file_path = os.path.join(cfg.megan_temp_dir, cfg.megan_out)
+    meg_file_path = os.path.join(cfg.megan_out_dir, cfg.megan_out)
 
     ep_read_raw_netcdf(ep_connection, meg_file_path, case_schema, meg_table,
                        ['TSTEP', 'LAY', 'ROW', 'COL'],
-                       [('TSTEP', 'TFLAG', 'DATE-TIME')])
+                       [None, None, None, None])
 
     grid_name = ep_cfg.domain.grid_name
     megan_cat = cfg.megan_category
@@ -843,22 +832,6 @@ def ep_megan_data_import(cfg, ext_mod_id):
         timestep = ep_cfg.run_params.time_params.timestep
         tstring = "timestamp '" + str(time_start) + "'" + ' + ("dim_TSTEP" - 1) * interval ' + "'" + str(timestep) + "'"
 
-        print(cur.mogrify('INSERT INTO "{schema}".ep_sg_out_emissions (sg_id, spec_id, cat_id, time_out, emiss) '
-                    'SELECT sg_id, spec_id, %s, {time_string}, emiss '
-                    '  FROM ('
-                    '    SELECT unnest(array[{cols_ap}]) AS spec_name, unnest(ARRAY[{cols_qu}]) AS emiss, "dim_TSTEP", grid_id '
-                    '      FROM "{schema}".{megan} '
-                    '      JOIN "{schema}".ep_grid_tz ON ("dim_ROW" = j AND "dim_COL" = i)'
-                    '    ) AS m '
-                    '    JOIN "{schema}".ep_out_species ON name = m.spec_name '
-                    '    JOIN sid_map USING (grid_id)'
-                    '    WHERE emiss > 0'
-                    .format(schema=case_schema,
-                            time_string=tstring,
-                            cols_ap=cols_ap,
-                            cols_qu=cols_qu,
-                            megan=meg_table),
-                    (megan_cat, )))
         cur.execute('INSERT INTO "{schema}".ep_sg_out_emissions (sg_id, spec_id, cat_id, time_out, emiss) '
                     'SELECT sg_id, spec_id, %s, {time_string}, emiss '
                     '  FROM ('
@@ -884,5 +857,3 @@ def run(cfg, ext_mod_id):
     megan_run(cfg)
     if ep_cfg.run_params.output_params.save_time_series_to_db:
         ep_megan_data_import(cfg, ext_mod_id)
-
-

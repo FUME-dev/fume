@@ -1,5 +1,26 @@
-__author__ = "Peter Huszar"
-__license__ = "GPL"
+"""
+Description: projection conversion classes and functions
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
 
 import numpy as np
 import pyproj
@@ -7,6 +28,8 @@ from pygrib import open as gribopen
 from netCDF4 import Dataset
 import lib.ep_io_fortran as fio
 from osgeo import osr, ogr
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
 
 class Domain:
     def __init__(self, nx, ny, nz, delx, dely, xorg, yorg, proj):
@@ -27,7 +50,7 @@ class Domain:
             self.xorg = xorg
             self.yorg = yorg
         else:
-            print('EE: no valid projection provided!')
+            log.error('EE: no valid projection provided!')
             raise ValueError
 
 
@@ -128,7 +151,7 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
         elif ftype == 'ALADIN':
             ifile = gribopen(ifilename)
         else:
-            print('EE: Unknown file format in get_projection_domain: '+ftype)
+            log.error('EE: Unknown file format in get_projection_domain:', ftype)
             raise ValueError
 
         if ftype == 'ALADIN':
@@ -140,7 +163,6 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
                 pjargs.append('+'+key+"="+str(value)+' ')
             proj4string = ''.join(pjargs)
             proj, XCENT, YCENT, p_alp, p_bet, p_gam = projection_parameters_from_srid_or_proj4(proj4str=proj4string)
-            #print(proj, XCENT, YCENT, p_alp, p_bet, p_gam)
             nx, ny, nz, delx, dely = grbmsg.Nx, grbmsg.Ny, None, grbmsg.DxInMetres, grbmsg.DyInMetres
             lat0 = grbmsg.latitudeOfFirstGridPointInDegrees
             lon0 = grbmsg.longitudeOfFirstGridPointInDegrees
@@ -175,7 +197,7 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
             elif ifile.GDTYP == 7:
                 projection = "EMERCATOR"
             else:
-                print('EE: MCIP input has unsupported projection. Check the GDTYP value!')
+                log.error('EE: MCIP input has unsupported projection. Check the GDTYP value!')
                 raise ValueError
 
 
@@ -191,7 +213,6 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
             nz -= 1
 
             xorg, yorg = -(nx/2.0*delx), -(ny/2.0*dely)
-#            XCENT, YCENT, p_alp, p_bet, p_gam = ifile.CEN_LON, ifile.CEN_LAT, ifile.TRUELAT1, ifile.TRUELAT2, ifile.STAND_LON
             #1=Lambert, 2=polar stereographic, 3=mercator, 6=lat-lon
             if ifile.MAP_PROJ == 1:
                 projection = "LAMBERT"
@@ -209,7 +230,6 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
            # first record
             ifile.seek(0)
             var = fio.read_record (ifile, endian, '40s240siiifif')
-            #print(var)
             # second record - this is what we need
             plon,plat,iutm,xorg,yorg,delx,dely,nx,ny,nz,iproj,istag,tlat1,tlat2,rdum = fio.read_record (ifile, endian, 'ffiffffiiiiifff')
             if iproj == 0:
@@ -254,10 +274,10 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
             else:
                 raise ValueError('EE: Unknown projection in RegCM {}'.format(projregcm))
         else:
-            print('EE: Unknown format '+ftype)
+            log.error('EE: Unknown format', ftype)
             raise ValueError
     except IOError:
-        print('EE: Error opening/reading file {}'.format(ifilename))
+        log.fmt_debug('EE: Error opening/reading file {}', ifilename)
         raise
 
     # xorg and yorg will mean the coordinates of the domain center
@@ -284,7 +304,7 @@ def create_projection(projection, XCENT, YCENT, p_alp, p_bet, p_gam, **kwargs):
     elif projection == 'MERCATOR': # general mercator - i.e. any angle between the cylinder and the north pole axis
         proj_string = '+proj=tmerc +lat_0='+str(p_alp)+' +lon_0='+str(p_bet)+' +k_0=1.0 +x_0='+str(XCENT)+' +y_0='+str(YCENT)
     else:
-        print('EE: so far we suuport only Lambert Conic Conformal, UTM, Equatorial Secant Mercator and Longlat projections.')
+        log.error('EE: so far we suuport only Lambert Conic Conformal, UTM, Equatorial Secant Mercator and Longlat projections.')
         raise ValueError
 
     for k,v in kwargs.items():
@@ -314,8 +334,8 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
         lon01, lat01 = myproj0(xorg0,yorg0,inverse=True)
         lon1 ,  lat1 = myproj (xorg ,yorg ,inverse=True)
         if (lat1 <= lat01 or lon1 <= lon01):
-            print('EE: inner domain spawns outside of the outer domain: lat01, lon01 = '+str(lat01)+', '+str(lon01))
-            print('                                                     lat1,   lon1 = '+str(lat1) +', '+str(lon1))
+            log.error('EE: inner domain spawns outside of the outer domain: lat01, lon01 = '+str(lat01)+', '+str(lon01))
+            log.error('                                                     lat1,   lon1 = '+str(lat1) +', '+str(lon1))
             raise ValueError
 
     # SE corner
@@ -323,8 +343,8 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
         lon02, lat02 = myproj0(xorg0+nx0*delx0,yorg0,inverse=True)
         lon2 ,  lat2 = myproj (xorg+nx*delx   ,yorg ,inverse=True)
         if (lat2 <= lat02 or lon2 >= lon02):
-            print('EE: inner domain spawns outside of the outer domain: lat02, lon02 = '+str(lat02)+', '+str(lon02))
-            print('                                                     lat2,   lon2 = '+str(lat2) +', '+str(lon2))
+            log.error('EE: inner domain spawns outside of the outer domain: lat02, lon02 = '+str(lat02)+', '+str(lon02))
+            log.error('                                                     lat2,   lon2 = '+str(lat2) +', '+str(lon2))
             raise ValueError
 
     # NE corner
@@ -332,8 +352,8 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
         lon03, lat03 = myproj0(xorg0+nx0*delx0,yorg0+ny0*dely0,inverse=True)
         lon3 ,  lat3 = myproj (xorg+nx*delx   ,yorg+ny*dely   ,inverse=True)
         if (lat3 >= lat03 or lon3 >= lon03):
-            print('EE: inner domain spawns outside of the outer domain: lat03, lon03 = '+str(lat03)+', '+str(lon03))
-            print('                                                     lat3,   lon3 = '+str(lat3) +', '+str(lon3))
+            log.error('EE: inner domain spawns outside of the outer domain: lat03, lon03 = '+str(lat03)+', '+str(lon03))
+            log.error('                                                     lat3,   lon3 = '+str(lat3) +', '+str(lon3))
             raise ValueError
 
     #NW corner
@@ -341,15 +361,15 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
         lon04, lat04 = myproj0(xorg0,yorg0+ny0*dely0,inverse=True)
         lon4 ,  lat4 = myproj (xorg ,yorg +ny*dely  ,inverse=True)
         if (lat4 >= lat04 or lon4 <= lon04):
-            print('EE: inner domain spawns outside of the outer domain: lat04, lon04 = '+str(lat04)+', '+str(lon04))
-            print('                                                     lat4,   lon4 = '+str(lat4) +', '+str(lon4))
+            log.error('EE: inner domain spawns outside of the outer domain: lat04, lon04 = '+str(lat04)+', '+str(lon04))
+            log.error('                                                     lat4,   lon4 = '+str(lat4) +', '+str(lon4))
             raise ValueError
 
 # initialize the final mapping matrix
 
         matrix  = np.empty( (nx+1,ny+1), dtype=object)
 
-        # scan trough the final grid
+# scan trough the final grid
 # for edges check if the mother domain contains ihte inner one
 
         for i in 1, nx:
@@ -360,7 +380,7 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
                 lon, lat = myproj (x,y, inverse=True)
                 x0,y0    = myproj0(lon,lat )
                 if (x0 <= xorg0 or x0 >= xorg0+nx0*delx0 or y0 <= yorg0 or y0 >= yorg0+ny0*dely0):
-                    print('EE: point (i,j) ='+str(i)+','+str(j)+' is outside of the mother domain: x0,y0 '+str(x0)+' ,'+str(y0), lat,lon )
+                    log.error('EE: point (i,j) ='+str(i)+','+str(j)+' is outside of the mother domain: x0,y0 '+str(x0)+' ,'+str(y0), lat,lon )
                     raise ValueError
 
                 i0 = int((x0-xorg0)/delx0)+1
@@ -387,7 +407,7 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
                 lon, lat = myproj (x,y, inverse=True)
                 x0,y0    = myproj0(lon,lat )
                 if (x0 <= xorg0 or x0 >= xorg0+nx0*delx0 or y0 <= yorg0 or y0 >= yorg0+ny0*dely0):
-                    print('EE: point (i,j) ='+str(i)+','+str(j)+' is outside of the mother domain: x0,y0 '+str(x0)+' ,'+str(y0), lat,lon )
+                    log.error('EE: point (i,j) ='+str(i)+','+str(j)+' is outside of the mother domain: x0,y0 '+str(x0)+' ,'+str(y0), lat,lon )
                     raise ValueError
 
                 i0 = int((x0-xorg0)/delx0)+1
@@ -434,7 +454,6 @@ def regrid(nx0, ny0, delx0, dely0, xorg0, yorg0, orig_projection, nx, ny, delx, 
 
     except ValueError as e:
 
-        print(str(e))
         raise
 
 def vert_interp(field0,zht0,zht,mpoints=True):
@@ -445,7 +464,7 @@ def vert_interp(field0,zht0,zht,mpoints=True):
         nz0   = np.size(field0)
         nz0_1 = np.size(zht0)
         if nz0 != nz0_1:
-            print('EE: the input field vertical gridding does not match the grid definition')
+            log.error('EE: the input field vertical gridding does not match the grid definition')
             raise ValueError
 
         nz =  np.size(zht)
@@ -484,8 +503,7 @@ def vert_interp(field0,zht0,zht,mpoints=True):
 
     except ValueError as ve:
 
-        print(str(ve))
-
+        raise
 
 def grid_desc(cfg,cdo_griddesc_file='griddesc',m3_griddesc_file=None):
     # create the griddesc file for CDO corresponding to the case grid
@@ -576,7 +594,6 @@ def grid_desc(cfg,cdo_griddesc_file='griddesc',m3_griddesc_file=None):
     ofile.close()
 
     if m3_griddesc_file != None:    # write GRIDDESC file for MEGAN
-        #ep_debug('II: ep_geo_tools: griddesc: writing M3 GRIDDESC file for MEGAN')
         if  proj == "LATLON":
             GDTYP = 1
         elif  proj == "UTM":
@@ -592,7 +609,7 @@ def grid_desc(cfg,cdo_griddesc_file='griddesc',m3_griddesc_file=None):
         elif  proj == "MERCATOR":
             GDTYP = 3
         else:
-            print( "EE: projection not known. Exit.....")
+            log.error( "EE: projection not known. Exit.....")
             raise ValueError
 
         grid_name = cfg.domain.grid_name
@@ -610,7 +627,3 @@ def grid_desc(cfg,cdo_griddesc_file='griddesc',m3_griddesc_file=None):
         ofile.close()
 
     return(xvals, yvals)
-
-
-
-

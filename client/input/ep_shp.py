@@ -1,6 +1,31 @@
+"""
+Description: shape-file import
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
 import osgeo.ogr
-from lib.ep_libutil import ep_connection
-from lib.ep_config import ep_cfg
+from lib.ep_libutil import ep_connection, ep_get_proj4_srid
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
 
 def osgeo_str_to_utf(s, encoding='Latin-1'):
     try:
@@ -8,11 +33,12 @@ def osgeo_str_to_utf(s, encoding='Latin-1'):
     except ValueError:
         return s
 
-def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema=None, tablename=None, tabletemp=False, tablesrid=None, geomdim=2):
+def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, proj4=None, conn=None, schema=None, tablename=None, tabletemp=False, tablesrid=None, geomdim=2, makevalid=True):
+    """ Imports shpfile into database. If the projection is not defined within the shp file it can be given either by shpsrid or proj4 string (in this priority)."""
     #global sql,sqlv
     # mapping of shp data types to postgresql types
     pgtype = dict({'Integer': 'integer', 'Real': 'float', 'String': 'varchar',
-                   'Integer64': 'bigint'})
+                   'Integer64': 'bigint', 'Date': 'date'})
     pggeomtype = dict({
         osgeo.ogr.wkbPoint: 'POINT',
         osgeo.ogr.wkbLineString: 'LINESTRING',
@@ -40,8 +66,6 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
         # layer properties
         geomtype = layer.GetGeomType()
         geomtypename = osgeo.ogr.GeometryTypeToName(geomtype)
-        geomproj4 = layer.GetSpatialRef().ExportToProj4()
-        print('Shape: ', shpname, geomtype, geomtypename, geomproj4)
         # table properties
         nfeatures = layer.GetFeatureCount()
         feature = layer.GetFeature(0)
@@ -55,16 +79,10 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
             fulltablename = '"'+tablename+'"'
         else:
             fulltablename = '"'+schema+'"."'+tablename+'"'
-        #if tablesrid is None or tablesrid == 0:
-        #    tablesrid = ep_cfg.domain.srid
-        print('Table: {}, {}, {}'.format(tablename, fulltablename, tempstr))
         # reading fields and their properties
-        # for i in range(layer.GetFeatureCount()):
         shpfields = []
         feature = layer.GetFeature(0)
         for i in range(feature.GetFieldCount()):
-            #?? .decode("Latin-1").encode("utf8")
-            #bytearray(feature.GetFieldDefnRef(i).GetTypeName(),'Latin-1','replace').decode(shpcoding)
             shpfield = dict({'name': feature.GetFieldDefnRef(i).GetName(), \
                              # 'typename': bytearray(feature.GetFieldDefnRef(i).GetTypeName(),'UTF-8','replace').decode(shpcoding), \
                              'typename': osgeo_str_to_utf(feature.GetFieldDefnRef(i).GetTypeName(), shpcoding), \
@@ -73,11 +91,9 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
                              'precision': feature.GetFieldDefnRef(i).GetPrecision(), \
                              'value': feature.GetField(i)})
             shpfields.append(shpfield)
-#            print('Field: ', shpfield['name'], shpfield['typename'], shpfield['fieldtype'], \
-#                   shpfield['width'], shpfield['precision'], shpfield['value'])
     except Exception as err:
-        print('Error reading shpfile '+shpfile)
-        print(str(err))
+        log.fmt_error('Error reading shpfile {}.', shpfile)
+        log.fmt_error(str(err))
         return False, tablegeomdim
     #
     # create table in database
@@ -102,48 +118,38 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
         tablegeomdim = pggeomdim[gt]
         #
         # get srid of shapefile
-        tempsrid = False
+        tempsrid = False        
+        try:  # try get srid from prj file
+            shpproj4 = layer.GetSpatialRef().ExportToProj4()            
+            shpsrid, tempsrid = ep_get_proj4_srid(shpproj4)
+        except:
+            raise        
+            log.fmt_debug('Projection information was not possible to retrieve from prj file {}. Will try to use epsg or proj4 from config file.', shpfile)
+        # if srid not set so far try proj4 string if given
+        if (shpsrid is None or shpsrid <=0) and proj4:
+            shpsrid, tempsrid = ep_get_proj4_srid(proj4)
         if shpsrid is None or shpsrid <= 0:
-            shpproj4 = layer.GetSpatialRef().ExportToProj4()
-            cur.execute('select "srid" from "spatial_ref_sys" where trim("proj4text") = trim(%s)', [shpproj4])
-            rec = cur.fetchone()
-            if rec is None:
-                # create temporary srid for transformation during the import
-                tempsrid = True
-                cur.execute('select max("srid") from "spatial_ref_sys"')
-                shpsrid = cur.fetchone()[0] + 1
-                print('create temporary user srid {}'.format(shpsrid))
-                cur.execute('insert into "spatial_ref_sys" ("srid","auth_name","auth_srid","srtext","proj4text") values (%s,%s,%s,%s,%s)', \
-                            [shpsrid, 'USER', shpsrid, 'PROJCS["import"]', shpproj4])
-            else:
-                shpsrid = rec[0]
-        if shpsrid is None or shpsrid <= 0:
-            print('Can not detect proper shape srid for file {}'.format(shpfile))
+            log.fmt_warning('Can not detect proper shape srid for file {}', shpfile)
             return False, tablegeomdim
         if tablesrid is None or tablesrid <= 0:
             tablesrid = shpsrid
-        print('Shp and table srid: {}, {}'.format(shpsrid, tablesrid))
+        log.fmt_tracing('Shp and table srid: {}, {}', shpsrid, tablesrid)
         #
         # test if table exists
         sql = 'DROP TABLE IF EXISTS ' + fulltablename
-        print(sql)
         cur.execute(sql)
         #
         # create psql table
         sql = 'CREATE ' + tempstr + ' TABLE ' + fulltablename + ' (gid serial'
         for f in shpfields:
             fl = ', "' + f['name'] + '" ' + pgtype[f['typename']]
-            if not f['typename'].startswith('Integer') and f['width'] > 0:
+            if not (f['typename'].startswith('Integer') or f['typename']=='Date') and f['width'] > 0:
                 fl += '(' + str(f['width']) + ')'
             sql += fl
         sql += ', geom geometry(' + tablegeomtype + ',' + str(tablesrid) + ')'
         sql += ', PRIMARY KEY (gid));'
-        print(sql)
+        log.debug(sql)
         cur.execute(sql)
-        # add geometry - already added in create table
-        #sql = "SELECT AddGeometryColumn('" + schema + "','" + tablename + "','geom','" + str(tablesrid) + "','" + tablegeomtype + "'," + str(geomdim) + ");"
-        #print(sql)
-        #cur.execute(sql)
         #
         # populate data
         sql1 = 'INSERT INTO ' + fulltablename + ' ('
@@ -154,17 +160,14 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
             sql2 += '%s,'
         sql1 += '"geom") VALUES ('
         sql = sql1 + sql2
-        if tablesrid != shpsrid:
-            sql += 'ST_Transform('
+        sql1 = 'ST_GeometryFromText(%s, %s)'
         if tablegeomtype.startswith('MULTI'):
-            sql += 'ST_Multi(ST_GeometryFromText(%s,%s))'
-        else:
-            sql += 'ST_GeometryFromText(%s, %s)'
+            sql1 = 'ST_Multi(' + sql1 + ')'
         if tablesrid != shpsrid:
-            sql += ',% s));'
-        else:
-            sql += ');'
-        print(sql)
+            sql1 = 'ST_Transform(' + sql1 + ',%s)'
+        if makevalid:
+            sql1 = 'ST_MakeValid(' + sql1 + ')'
+        sql += sql1 + ');'
         #
         # reading features (rows) and import them into table
         layer.ResetReading()
@@ -173,20 +176,15 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
             sqlv = []
             for i in range(len(shpfields)):
                 if (shpfields[i]['typename'] == 'String') and (feature.GetField(i) is not None):
-                    # sqlv.append(bytearray(feature.GetField(i), 'Latin-1', #'UTF-8',
-                    #                       'replace').decode(shpcoding))
                     sqlv.append(osgeo_str_to_utf(feature.GetFieldAsString(i), shpcoding))
                 else:
                     sqlv.append(feature.GetField(i))
-            #print(sqlv)
             wkt = feature.GetGeometryRef().ExportToWkt()
             sqlv.append(wkt)
             # ??? shouldn't this be also integer?
             sqlv.append(str(shpsrid))
             if tablesrid != shpsrid:
                 sqlv.append(int(tablesrid))
-            #print(sqlv)
-            #print(cur.mogrify(sql, sqlv))
             cur.execute(sql, sqlv)
             feature = layer.GetNextFeature()
         # create geometry index
@@ -195,24 +193,19 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, conn=None, schema
         #
         # calculate statistics
         sqla = 'ANALYZE ' + fulltablename + ';'
-        print(sqla)
         cur.execute(sqla)
-        #if tempsrid:
-        #    # delete temporary srid
-        #    cur.execute('delete from "spatial_ref_sys" where "srid"=%s',
-        #                [shpsrid])
     except Exception as err:
-        print('Error creating table '+ fulltablename)
-        print(str(err))
+        log.fmt_error('Error creating table {}.', fulltablename)
+        log.fmt_error(str(err))
         conn.rollback()
         retval = False
         raise
     else:
-        print('Table ' + fulltablename + ' successfully imported.')
+        log.fmt_debug('Table {} successfully imported.', fulltablename)
         conn.commit()
         retval = True
     finally:
         cur.close()
         conn.commit()
-    #
+
     return retval, tablegeomdim

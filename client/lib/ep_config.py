@@ -1,13 +1,29 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-'''Configuration module
-
+"""
+Description: Configuration module
 If this module is executed by itself, it loads the default configspec file and
 prints out an example config file with all the default values. Note that values
 without defaults are omitted, therefore the produced config file might be
 invalid (incomplete).
-'''
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
 
 __all__ = ['cfgfile', 'ep_cfg', 'init_global', 'ConfigFile']
 
@@ -64,6 +80,9 @@ class ConfigValues(object):
 
     def __iter__(self):
         return iter(self.__dict__)
+
+    def __getitem__(self, key):
+        return self.__dict__[key]
 
 class ConfigValidationError(Exception):
     pass
@@ -126,8 +145,8 @@ def init_global(cfg_fnames, cfgspec_dir=None):
 
     In this usage pattern, all the modules that want to use configuration only
     need to write:
-    >>> from ep_config import ep_cfg
-    >>> do_whatever_with(ep_cfg.some_section.some_value)
+    >> from ep_config import ep_cfg
+    >> do_whatever_with(ep_cfg.some_section.some_value)
     '''
     global cfgfile, ep_cfg, default_cfgspec_dir
 

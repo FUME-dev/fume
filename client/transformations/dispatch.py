@@ -168,3 +168,99 @@ def run():
                  'ep_emission_sets']) # FIXME?
 
     ep_connection.commit()
+ans.filter_by is not None:
+            filter_key, filter_val = get_filter(trans.filter_by, trans.filter_value)
+            filters.append([filter_key, filter_val])
+
+        outsrid = None
+        if hasattr(trans, 'outsrid') and trans.outsrid is not None:
+            outsrid = trans.outsrid
+
+        transformation = SourceFilterTransformation(filters=filters, outsrid=outsrid,
+                                                 mask_to_grid=trans.mask_to_grid,
+                                                 transform_srid=trans.transform_srid)
+
+    elif trans.type == 'area_multiplicator':
+        transformation = AreaTransformation()
+
+    elif trans.type == 'limit_to_grid':
+        transformation = LimitToGridTransformation()
+
+    elif trans.type == 'srid_transform':
+        transformation = SRIDTransformation()
+
+    elif trans.type == 'mask':
+        log.debug('Mask transaction:', trans.mask_file, trans.mask_filters)
+        maskrel = get_geometry_relation(trans.mask_file, trans.mask_filters)
+        transformation = MaskTransformation(maskrel=maskrel, mask_type=trans.mask_type)
+
+    elif trans.type == 'to_grid':
+        if hasattr(trans, 'normalize'):
+            normalize = trans.normalize
+        else:
+            normalize = None
+        if hasattr(trans, 'method'):
+            method = trans.method
+        else:
+            method = 'Area'
+        transformation = ToGridTransformation(normalize=normalize, method=method)
+
+    elif trans.type == 'intersect' and hasattr(trans, 'intersect') and trans.intersect is not None:
+        # TODO this is wrong, it remainded from time of call to_grid as intersect, needs to be generalized here!!!
+        case_schema = ep_cfg.db_connection.case_schema
+        inrel2 = Relation(schema=case_schema, name=trans.intersect, fields=['grid_id'])
+        try:
+            outrel = get_relation(trans.target)
+            outrel.coef = outrel.fields[0]  # FIXME
+        except AttributeError:
+            outrel = None
+        transformation = IntersectTransformation(inrel2=inrel2, outrel=outrel)
+
+    elif trans.type == 'surrogate' and hasattr(trans, 'surrogate_set') and trans.surrogate_set is not None:
+        if hasattr(trans, 'surrogate_type'):
+            transformation = SurrogateTransformation(surset=trans.surrogate_set, surtype=trans.surrogate_type)
+        else:
+            transformation = SurrogateTransformation(surset=trans.surrogate_set)
+
+    elif trans.type == 'scenarios':
+        transformation = ScenarioTransformation(transparams)
+    elif trans.type == 'level_filter':
+        transformation = LevelFilterTransformation(transparams)
+
+    return transformation
+
+
+def run():
+    cur = ep_connection.cursor()
+    log.debug('*** Initialize transformation queue...')
+    cur.execute('SELECT ep_init_transformation_queue(%s)', [ep_cfg.db_connection.case_schema])
+    try:
+        for q in ep_rtcfg['transformation_queues']:
+            log.debug('Run transformation queue #', q.queue_id)
+            q.process()
+    except (DataError, ProgrammingError):
+        log.sql_debug(ep_connection)
+        raise
+
+    log.debug('*** Finalize transformation queue...')
+    ftq_placeholders = ['%s']*6
+    ftq_args = [ep_cfg.db_connection.source_schema,
+                ep_cfg.db_connection.case_schema,
+                'ep_in_sources', 'ep_in_emissions', 'ep_in_activity_data',
+                'ep_emission_sets']
+
+    if ep_cfg.run_params.scenarios.all_emissions:
+        log.debug('*** Global scenario ', ep_cfg.run_params.scenarios.all_emissions, 'will be applied')
+        ftq_args.extend(('ep_scenario_list', 'ep_scenario_factors_all', ep_cfg.run_params.scenarios.all_emissions))
+        ftq_placeholders.extend(['%s']*3)
+    else:
+        log.debug('*** No global scenario configured...')
+
+    log.debug(
+    cur.mogrify('SELECT ep_finalize_transformation_queue({})'.format(', '.join(ftq_placeholders)),
+                ftq_args)
+                )
+    cur.execute('SELECT ep_finalize_transformation_queue({})'.format(', '.join(ftq_placeholders)),
+                ftq_args)
+
+    ep_connection.commit()

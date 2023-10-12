@@ -1,9 +1,36 @@
+"""
+Description: CMAQ output postprocessor
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
 from datetime import datetime
 import numpy as np
 from netCDF4 import Dataset
 from postproc.receiver import DataReceiver
+from postproc.netcdf import NetCDFAreaTimeDisaggregator
 import os
 
+
+# CMAQ-specific projection IDs
 gdtyp_mapping = {
         'LATLON': 1,
         'UTM': 5,
@@ -24,9 +51,101 @@ def long_object_name(s):
     return '{0:16s}'.format(s)
 
 
+class CMAQAreaTimeWriter(NetCDFAreaTimeDisaggregator):
+    """
+    Postprocessor writing time disaggregated area emissions.
+    *Time-optimized version: time disaggregation performed with NetCDF
+    files. Requires a prior run of NetCDFTotalAreaWriter!*
+    """
+
+    def setup(self):
+        """
+        Run NetCDF setup with CMAQ-specific overrides:
+        Dimensions names are x=COL, Y=ROW, Z=LAY, T=TSTEP
+        Do not let the parent class create a time variable,
+        projection attributes and close the file during finalize.
+        """
+        super().setup(filename=self.cfg.postproc.cmaqareawriter.outfile,
+                      no_create_t_var=True, no_create_projection_attrs=True,
+                      create_v_dim=True, v_dim='VAR',
+                      x_dim='COL', y_dim='ROW', z_dim='LAY', t_dim='TSTEP',
+                      no_close_outfile=True)
+
+        self.outfile.createDimension('DATE-TIME', 2)
+
+    def finalize(self):
+        """
+        Finalization steps
+        ------------------
+
+         - create the CMAQ-specific time variable TFLAG
+         - run parent finalize (save output data and generic NetCDF attributes)
+         - save time data
+         - change the long_name attribute of output variables to CMAQ format
+         - save CMAQ-specific attributes
+         - close the file
+
+        """
+        self.timevar = self.outfile.createVariable('TFLAG', 'i4', ('TSTEP', 'VAR', 'DATE-TIME'))
+        self.timevar.units = '<YYYYDDD,HHMMSS>'
+        self.timevar.long_name = 'FLAG           '
+        self.timevar.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
+
+        super().finalize()
+
+        for timestep, datetime in enumerate(self.rt_cfg['run']['datestimes']):
+            date, time = cmaq_date_time(datetime)
+            self.timevar[timestep,:,0] = date
+            self.timevar[timestep,:,1] = time
+
+        for outvar in self.outvars:
+            outvar.long_name = long_object_name(outvar.long_name)
+
+        setattr(self.outfile, 'VAR-LIST', ''.join([long_object_name(spec[1])
+                                                   for spec in self.species]))
+        self.outfile.FILEDESC='CMAQ area emissions created by FUME ' + self.cfg.run_params.output_params.output_description
+        self.outfile.FTYPE = np.int32(1)
+        self.outfile.EXEC_ID = '????????????????'
+        self.outfile.NTHIK = np.int32(1)
+        self.outfile.NCOLS = np.int32(self.cfg.domain.nx)
+        self.outfile.NROWS = np.int32(self.cfg.domain.ny)
+        self.outfile.NLAYS = np.int32(self.cfg.domain.nz)
+        self.outfile.NVARS = np.int32(len(self.species))
+        start_date, start_time = cmaq_date_time(self.rt_cfg['run']['datestimes'][0])
+        cur_date, cur_time = cmaq_date_time(datetime.now())
+        self.outfile.SDATE = np.int32(start_date)
+        self.outfile.STIME = np.int32(start_time)
+        self.outfile.CDATE = np.int32(cur_date)
+        self.outfile.CTIME = np.int32(cur_time)
+        self.outfile.WDATE = np.int32(cur_date)
+        self.outfile.WTIME = np.int32(cur_time)
+        self.outfile.TSTEP = np.int32(self.cfg.run_params.time_params.timestep/3600*10000)
+        self.outfile.GDTYP = np.int32(gdtyp_mapping[self.rt_cfg['projection_params']['proj']])
+        self.outfile.VGTYP = np.int32(self.cfg.postproc.cmaqareawriter.vgtyp)
+        self.outfile.VGTOP = np.float32(self.cfg.postproc.cmaqareawriter.vgtop)
+        self.outfile.VGLVLS = np.float32(self.cfg.postproc.cmaqareawriter.vglvls)
+        self.outfile.P_ALP = np.float64(self.rt_cfg['projection_params']['p_alp'])
+        self.outfile.P_BET = np.float64(self.rt_cfg['projection_params']['p_bet'])
+        self.outfile.P_GAM = np.float64(self.rt_cfg['projection_params']['p_gam'])
+        self.outfile.XCENT = np.float64(self.rt_cfg['projection_params']['lon_central'])
+        self.outfile.YCENT = np.float64(self.rt_cfg['projection_params']['lat_central'])
+        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
+        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        self.outfile.XORIG = np.float64(xorig)
+        self.outfile.YORIG = np.float64(yorig)
+        self.outfile.XCELL = np.float64(self.cfg.domain.delx)
+        self.outfile.YCELL = np.float64(self.cfg.domain.dely)
+        self.outfile.GDNAM = self.cfg.domain.grid_name
+        self.outfile.UPNAM = '???'
+        self.outfile.HISTORY = '???'
+
+        self.outfile.close()
+
+
 class CMAQWriter(DataReceiver):
     """
     Postprocessor class for writing CMAQ emission input files.
+    *Non time-optimized version*
     This is the base class for the common CMAQ format settings and should not be
     instantiated by itself. Descendant classes CMAQAreaWriter or CMAQPointWriter
     should be used instead.
@@ -81,6 +200,8 @@ class CMAQWriter(DataReceiver):
 class CMAQAreaWriter(CMAQWriter):
     """
     Postprocessor class for writing CMAQ area emission file.
+    *Non time-optimized version: time disaggregation performed by the
+    database backend!*
     """
 
     def setup(self):
@@ -96,10 +217,9 @@ class CMAQAreaWriter(CMAQWriter):
         self.timevar[timestep,:,0] = date
         self.timevar[timestep,:,1] = time
         for i, spectuple in enumerate(self.species):
-#            specid, specname = spectuple
             self.outvars[i][timestep,:,:,:] = data.transpose(2,1,0,3)[:,:,:,i]
 
-    def receive_area_species(self, species):
+    def receive_species(self, species):
         self.species = species
 
         # Need to wait for the list of species to create these
@@ -124,9 +244,10 @@ class CMAQAreaWriter(CMAQWriter):
         self.outfile.NVARS = np.int32(len(self.species))
         setattr(self.outfile, 'VAR-LIST', ''.join([long_object_name(spec[1])
                                                    for spec in self.species]))
-        self.outfile.FILEDESC='CMAQ area emissions'
+        self.outfile.FILEDESC='CMAQ area emissions created by FUME ' + self.cfg.run_params.output_params.output_description
 
         super().finalize()
+
 
 class CMAQPointWriter(CMAQWriter):
     """
@@ -286,7 +407,7 @@ class CMAQPointWriter(CMAQWriter):
         self.outfilestk.NLAYS = np.int32(1)
         self.outfilestk.NVARS = np.int32(15)
 
-        self.outfilestk.FILEDESC='CMAQ point emissions stack param file'
+        self.outfilestk.FILEDESC='CMAQ point emissions stack param file created by FUME ' + self.cfg.run_params.output_params.output_description
 
         start_date, start_time = cmaq_date_time(self.rt_cfg['run']['datestimes'][0])
         cur_date, cur_time = cmaq_date_time(datetime.now())

@@ -1,4 +1,27 @@
-﻿--drop function ep_mask(text,text,text[],text,text,text,text,text,text,text,text,text,boolean,boolean);
+﻿/*
+Description: It creates ep_mask FUME sql function.
+*/
+
+/*
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+*/
+
+--drop function (text,text,text[],text,text,text,text,text,text,text,text,text,boolean,boolean);
 
 /*********************************************************************
 * This function masks table1 by union of geometries from table2
@@ -18,6 +41,7 @@ create or replace function ep_mask (
     mask_function text,
     schemai text,
     tablei text,
+    sridi integer,
     idi text,
     coefi text,
     createtable boolean,
@@ -49,6 +73,7 @@ declare
     sqlcoef text;
     sqldim text;
     sqlfields1 text;
+    ex boolean;
 
 begin
     -- construct table full names
@@ -78,6 +103,14 @@ begin
         into geomcol1, geomdim1, srid1, geomtype1
         using schema1, table1;
 
+    -- geomdim1 is incorrect, it is cardiality of coordinates
+    -- read it as dimension of the first geometry in table
+    sqltext = format('select exists(select %I from %s limit 1)', geomcol1, tablename1);
+    execute sqltext into ex;
+    if ex then
+      sqltext = format('select ST_Dimension(%I) from %s limit 1', geomcol1, tablename1);
+      execute sqltext into geomdim1;
+    end if;
     raise notice 'Geom1 %, %, %, %, %, %', schema1, table1, geomcol1, geomdim1, srid1, geomtype1;
 
     execute 'select f_geometry_column, coord_dimension, srid, type
@@ -150,14 +183,24 @@ begin
         else
             geomtypei = 'MULTI'||geomtype1;
         end if;
+
+        -- sridi
+        if sridi = 0 then
+            sridi = srid1;
+        end if;
+
         -- create geometry column
-        perform AddGeometryColumn(schemai, tablei, geomcol1, srid1, geomtypei, geomdim1);
+        -- raise notice 'AddGeometryColumn: %, %, %, %, %, %', schemai, tablei, geomcol1, sridi, geomtypei, geomdim1;
+        -- perform AddGeometryColumn(schemai, tablei, geomcol1, sridi, geomtypei, geomdim1);
+        sqltext = format('ALTER TABLE %s ADD COLUMN %I geometry(%s,%s)', tablenamei, geomcol1, geomtypei, sridi);
+        raise notice 'Add geometry: %', sqltext;
+        execute sqltext;
 
     end if;
 
     -- retrieve mask geometry
-    if (srid1 <> 0) then
-        sqltext = format('SELECT ST_Transform(ST_UNION(%I), %s) FROM %s', geomcol2, srid1, tablename2 );
+    if (sridi <> 0 and sridi <> srid1) then
+        sqltext = format('SELECT ST_Transform(ST_UNION(%I), %s) FROM %s', geomcol2, sridi, tablename2 );
     else
         sqltext = format('SELECT ST_UNION(%I) FROM %s', geomcol2, tablename2 );
     end if;
@@ -166,7 +209,7 @@ begin
     end if;
     raise notice 'geommask sqltext: %', sqltext;
     execute sqltext into geommask;
-    raise notice 'geommask %', geommask;
+    --raise notice 'geommask %', geommask;
     -- check dimension of the mask geometry
     execute 'SELECT ST_Dimension($1)' into maskdim using geommask;
     if ( maskdim < 2 ) then
@@ -190,7 +233,7 @@ begin
     sqltext = sqltext || ') select ';
 
     -- intersect geometry
-    sqltext = sqltext || format('%s(%I,$1) ',  mask_function, geomcol1);
+    sqltext = sqltext || format('ST_Multi(ST_CollectionExtract(%s(%I,$1),$2)) ',  mask_function, geomcol1);
 
     -- field values
     foreach field in array fields1
@@ -200,15 +243,16 @@ begin
 
     -- coefficient
     -- dimmension of geometry
-    sqldim = format('ST_Dimension(%I)', geomcol1);
+    --sqldim = format('ST_Dimension(%I)', geomcol1);
+    -- geomdim1
 
     -- coef1 multiplication string
     sqlcoef = '';
     if coef1 is not NULL and coef1 <> '' then
-        sqlcoef = sqlcoef||format(' * %I',coef1);
+        sqlcoef = sqlcoef||format(' * %I', coef1);
     end if;
 
-    -- coefi calsulation
+    -- coefi calculation
     sqltext = sqltext || format(
         ', CASE
              WHEN %s = 2 THEN
@@ -224,16 +268,18 @@ begin
                    ST_Length(%s(%I,$1))/ST_Length(%I) %s
                  ELSE
                    0.0
-               END
+                 END
              ELSE 1.0 %s
         END ',
-        sqldim, geomcol1, mask_function, geomcol1, geomcol1, sqlcoef,
-        sqldim, geomcol1, mask_function, geomcol1, geomcol1, sqlcoef, sqlcoef);
+        geomdim1, geomcol1, mask_function, geomcol1, geomcol1, sqlcoef,
+        geomdim1, geomcol1, mask_function, geomcol1, geomcol1, sqlcoef, sqlcoef);
     
     sqltext = sqltext || format(' FROM %s ', tablename1);
+    sqltext = sqltext || format(' WHERE %s(%I,$1) IS NOT NULL ', mask_function, geomcol1);
 
     raise notice 'Mask sqltext: %', sqltext;
-    execute sqltext using geommask;
+    -- parameter type in ST_CollectionExtract corresponds to geomdim+1
+    execute sqltext using geommask, geomdim1+1;
 
     if createtable then
         -- create geometry index

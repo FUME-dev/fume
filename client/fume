@@ -1,12 +1,32 @@
-#!/usr/bin/env python3
+"""
+Description: The main executable file of the FUME model.
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
 
 import os
 import sys
-import time
 import importlib
 from argparse import ArgumentParser
 from lib.ep_config import init_global
-import psycopg2
 
 # Try to detect interactive mode (e.g. pasting parts of code into console)
 # to bypass cmdline arguments parsing - for debugging
@@ -29,6 +49,11 @@ else:
 execdir = os.path.dirname(os.path.abspath(__file__))
 init_global(config_filename, cfgspec_dir=os.path.join(execdir, 'conf'))
 from lib.ep_config import ep_cfg
+
+# Initialize logging
+import lib.ep_logging
+lib.ep_logging.configure()
+log = lib.ep_logging.Logger(__name__)
 
 from lib.ep_libutil import ep_rtcfg, ep_getconnection
 
@@ -64,6 +89,10 @@ if ep_cfg.debug:
     # check the db connection
     from lib.ep_libutil import ep_connection
 
+# Initialize reporting
+import lib.ep_reporting
+lib.ep_reporting.configure()
+
 # Set up main queue
 # Moved to ep_workflow.conf file
 with open(argv.workflow, 'r') as workflow_file:
@@ -74,22 +103,13 @@ with open(argv.workflow, 'r') as workflow_file:
 from lib.ep_libutil import exec_timer
 
 for func in main_queue:
-    if ep_cfg.debug:
-        print('*** Running workflow function ', func)
-
+    log.fmt_info('Running {}', func)
     mod_name, func_name = func.rsplit('.', 1)
     mod_obj = importlib.import_module(mod_name)
     func_obj = getattr(mod_obj, func_name)
 
     with exec_timer(func) as timer:
-        try:
-            func_obj()
-        except psycopg2.Error:
-            print('*** Database error:')
-            for notice in ep_connection.notices:
-                print('**** ', notice)
-
-            raise
+        func_obj()
 
 # Execute user code here...
 

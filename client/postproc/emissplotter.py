@@ -1,14 +1,36 @@
+"""
+Description: Simple plotter postprocessor
+
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
 import os
 import numpy as np
 import matplotlib
-
 matplotlib.use('Agg')
-
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon as mpl_polygon
 from postproc.receiver import DataReceiver, requires
 from lib.misc import get_polygons_from_file, draw_multipolygon_on_map
-from lib.ep_libutil import ep_debug
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
 
 
 _basemap_resolution = 'i'
@@ -82,7 +104,7 @@ class EmissPlot():
         except AttributeError:
             self.overlay_polygons = []
         except IOError:
-            ep_debug('No such file or directory: ', self.cfg.postproc.emissplotter.overlay_polygons)
+            log.debug('No such file or directory: ', self.cfg.postproc.emissplotter.overlay_polygons)
             self.overlay_polygons = []
 
     def plot(self, data, filename, **kwargs):
@@ -130,7 +152,7 @@ class EmissPlotterBase(DataReceiver):
         except AttributeError:
             self.filetype = 'png'
 
-    def receive_area_species(self, species):
+    def receive_species(self, species):
         self.species = species
 
     def receive_grid(self, grid_x, grid_y):
@@ -153,7 +175,7 @@ class EmissPlotter(EmissPlotterBase):
         except AttributeError:
             self.filename_pattern = 'emissions_{species}_{datetime}'
 
-    @requires('grid', 'area_species')
+    @requires('grid', 'species')
     def receive_area_emiss(self, timestep, data):
         time = self.rt_cfg['run']['datestimes'][timestep]
         for s, spectuple in enumerate(self.species):
@@ -162,7 +184,7 @@ class EmissPlotter(EmissPlotterBase):
             filename = self.filename_pattern.format(species=specname, datetime=time) + '.' + self.filetype
             self.plotter.plot(data[:, :, 0, s].T, filename, title=title)
 
-    def receive_area_species(self, species):
+    def receive_species(self, species):
         self.species = species
 
 
@@ -181,7 +203,7 @@ class TotalEmissPlotter(EmissPlotterBase):
         except AttributeError:
             self.filename_pattern = 'emissions_{species}'
 
-    @requires('grid', 'area_species')
+    @requires('grid', 'species')
     def receive_total_emiss(self, data):
         for s, spectuple in enumerate(self.species):
             specid, specname = spectuple

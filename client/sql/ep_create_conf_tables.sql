@@ -1,4 +1,25 @@
--- create core emisproc tables
+/*
+Description: It creates core FUME tables.
+*/
+
+/*
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+*/
 
 -- list of models and their versions
 create table if not exists "{conf_schema}"."ep_aq_models" (
@@ -95,7 +116,7 @@ create index if not exists "ep_time_var_resolution" on "{conf_schema}"."ep_time_
 create table if not exists "{conf_schema}"."ep_time_var_values" (
     tv_id int,          	   	    -- time variation profile id
     period int,        			    -- time period number (1..12 for month time profile, 1 (Mon)..7 (Sun) day, 0..23 hour)
-    tv_factor real not null,        -- time variation (multiplicative) factor that determines variance from average month, day or hour
+    tv_factor numeric not null,        -- time variation (multiplicative) factor that determines variance from average month, day or hour
 									-- sum of tv_factors for one tv_id should be 12 (month), 7 (day) or 24 (hour)
     primary key (tv_id, period), 
     foreign key (tv_id) references "{conf_schema}"."ep_time_var" 
@@ -116,7 +137,7 @@ create table if not exists "{conf_schema}"."ep_time_var_mapping" (
 create table "{conf_schema}"."ep_time_var_series" (
     cat_id bigint,
     time_loc timestamp,
-    tv_factor real not null,
+    tv_factor numeric not null,
     primary key (cat_id, time_loc),
     foreign key (cat_id) references "{conf_schema}"."ep_emission_categories"
 );
