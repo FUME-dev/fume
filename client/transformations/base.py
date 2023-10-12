@@ -1,33 +1,24 @@
-from abc import ABC, abstractmethod
+"""
+Description: Base classes and helper functions for the transformations module.
 
+Transformation: Base abstract class for all transformations, declares an
+                abstract method apply all transformations must implement
 
-class Transformation(ABC):
-    def __init__(self, *args, **kwargs):
-        pass
+OneToOneTransformation: Base class for transformations that perform any
+    "conversion" from one relation to another one
 
-    @abstractmethod
-    def apply(self):
-        pass
+TwoToOneTransformation: Base class for transformations that perform any
+    "conversion" from two relations to one relation
+"""
 
+"""
+This file is part of the FUME emission model.
 
-class OneToOneTransformation(Transformation):
-    parameters = ['inrelation', 'outrelation', 'outsrid']
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-    def __init__(self, inrel=None, outrel=None, outsrid=None):
-        self.inrelation = inrel
-        self.outrelation = outrel
-        self.outsrid = outsrid
-
-
-class TwoToOneTransformation(Transformation):
-    parameters = ['inrelation', 'inrelation2', 'outrelation', 'outsrid']
-
-    def __init__(self, inrel1=None, inrel2=None, outrel=None, outsrid=None):
-        self.inrelation = inrel1
-        self.inrelation2 = inrel2
-        self.outrelation = outrel
-        self.outsrid = outsrid
-is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
 implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 Public License for more details.
 

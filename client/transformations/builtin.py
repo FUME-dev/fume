@@ -1,14 +1,103 @@
-from lib.db import Relation
-from transformations.base import Transformation, OneToOneTransformation,\
-                                 TwoToOneTransformation
+"""
+Description: builtin transformation classes
 
-try:
-    from lib.ep_libutil import ep_debug
-except RuntimeError:
-    ep_debug = print
+"""
+
+"""
+This file is part of the FUME emission model.
+
+FUME is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+FUME is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+Information and source code can be obtained at www.fume-ep.org
+
+Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
+"""
+
+from lib.db import Relation
+from lib.ep_config import ep_cfg
+from transformations.base import Transformation, OneToOneTransformation,\
+                                 TwoToOneTransformation, \
+                                 virtual
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
 
 _sql_operators = {'eq': '=', 'like': 'like', 'neq': '!=', 'nlike': 'not like',
                   'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<='}
+
+
+@virtual
+class ScenarioTransformation(Transformation):
+    """
+    Save a mapping between transformation chains and scenarios inside
+    the ep_transformation_chains_scenarios table.
+    The mapping is then used in the ep_finalize_transformation_queue pl/pgsql
+    functions (server/ep_case_proc.sql).
+    """
+    def __init__(self, scenarios):
+        self.scenarios = scenarios
+        if isinstance(self.scenarios, str):
+            self.scenarios = self.scenarios.split(' ')
+
+    def apply(self):
+        with self.db_connection.cursor() as cur:
+            cur.execute('INSERT INTO "{case_schema}"."ep_transformation_chains_scenarios" '
+                        '(chain_id, scenario_id) '
+                        'SELECT %(chain_id)s, scenario_id FROM "{source_schema}"."ep_scenario_list" '
+                        'WHERE "scenario_name" = ANY(%(scenarios)s)'.
+                        format(case_schema=self.cfg.db_connection.case_schema,
+                               source_schema=self.cfg.db_connection.source_schema),
+                        {'scenarios': self.scenarios, 'chain_id': self.queue.queue_id})
+            
+            cur.execute('SELECT * FROM UNNEST(%(scenarios)s) '
+                        'EXCEPT '
+                        'SELECT scenario_name FROM "{source_schema}"."ep_scenario_list" '.
+                        format(source_schema=self.cfg.db_connection.source_schema),
+                        {'scenarios': self.scenarios})
+            not_scenarios = [scen[0] for scen in cur.fetchall()]  
+            if not_scenarios:
+                raise ValueError('Scenarios {} are not defined.'.format(', '.join(map(str, not_scenarios))))
+
+    def cleanup(self):
+        with self.db_connection.cursor() as cur:
+            cur.execute('DELETE FROM "{case_schema}"."ep_transformation_chains_scenarios"'
+                        'WHERE chain_id=%s'.format(case_schema=self.cfg.db_connection.case_schema),
+                        [self.queue.queue_id])
+
+
+@virtual
+class LevelFilterTransformation(Transformation):
+    """
+    Save a mapping between transformation chains and vertical levels inside
+    the ep_transformation_chains_levels table.
+    """
+    def __init__(self, level):
+        self.level = level
+
+    def apply(self):
+        sqltext = 'INSERT INTO "{case_schema}"."ep_transformation_chains_levels" '\
+                  '(chain_id, vertical_level) VALUES ({chain_id}, {level}) ' \
+                  'ON CONFLICT DO NOTHING'.\
+                  format(case_schema=self.cfg.db_connection.case_schema,\
+                  level=self.level, chain_id=self.queue.queue_id)
+        log.debug('LevelFilterTransformation:', 'level', self.level, 'chain_id', self.queue.queue_id)
+        log.debug(sqltext)
+        with self.db_connection.cursor() as cur:
+            cur.execute(sqltext)
+
+    def cleanup(self):
+        with self.db_connection.cursor() as cur:
+            cur.execute('DELETE FROM "{case_schema}"."ep_transformation_chains_levels"'
+                        'WHERE chain_id=%s'.format(case_schema=self.cfg.db_connection.case_schema),
+                        [self.queue.queue_id])
 
 
 class MaskTransformation(TwoToOneTransformation):
@@ -16,50 +105,30 @@ class MaskTransformation(TwoToOneTransformation):
                   'mask_filters', 'mask_type']
 
     _mask_postgis_functions = {'': 'St_Intersection', 'inside': 'St_Intersection', 'outside': 'St_Difference'}
-    _union_postgis_functions = {'': 'St_Union', 'any': 'St_Union', 'all': 'St_Difference'}
+    # remark: ST_Disjoin is not used here according the postgis reference:
+    # The opposite of ST_Intersects is ST_Disjoint(geometry A , geometry B). If two geometries are disjoint, they do not intersect, and vice-versa.
+    # In fact, it is often more efficient to test "not intersects" than to test "disjoint" because the intersects tests can be spatially indexed, while the disjoint test cannot.
+    #_union_postgis_functions = {'': 'St_Union', 'any': 'St_Union', 'all': 'St_Difference'}
+
     def __init__(self, inrel=None, maskrel=None, outrel=None, outsrid=None,
                  mask_filters=None, mask_type=None):
         super().__init__(outrel=outrel, outsrid=outsrid)
+        self.has_coef = True
         self.inrelation = inrel
         self.inrelation2 = maskrel
         self.outrelation = outrel
         self.mask_filters = mask_filters
         self.mask_type = mask_type
 
-    @property
-    def inrel(self):
-        return self.inrelation
-
-    @inrel.setter
-    def inrel(self, rel):
-        self.inrelation = rel
-
-    @property
-    def mask(self):
-        return self.inrelation2
-
-    @mask.setter
-    def mask(self, rel):
-        self.inrelation2 = rel
-
     def apply(self):
-        self.outrelation.fields = self.inrelation.fields
-        #self.outrelation.coef = self.inrelation.coef
+        self.outrelation.fields = self.inrelation.fields[:]
         cur = self.db_connection.cursor()
-        #condition = ''
-        #if self.mask_filters != '':
-        #    condition = 'WHERE '+self.mask_filters
-
-        #q = 'SELECT ST_UNION(geom) FROM "{}"."{}" {}'.format(self.inrelation2.schema, self.inrelation2.name, condition)
-        #ep_debug('mask geom:', q)
-        #cur.execute(q)
-        #geom = cur.fetchone()[0]
-
-        pg_function = self._mask_postgis_functions[self.mask_type]
+        mask_pg_function = self._mask_postgis_functions[self.mask_type]
+        log.debug('mask_pg_function: ', mask_pg_function)
         q = cur.mogrify(
             'SELECT * FROM ep_mask('
             '%s, %s, %s, %s, %s, %s, '
-            '%s, %s, %s, %s, %s, %s, %s, %s '
+            '%s, %s, %s, %s, %s, %s, %s, %s, %s '
             ')', [self.inrelation.schema,
                   self.inrelation.name,
                   '{'+','.join([i for i in self.inrelation.fields])+'}',
@@ -67,47 +136,132 @@ class MaskTransformation(TwoToOneTransformation):
                   self.inrelation2.schema,
                   self.inrelation2.name,
                   self.mask_filters,
-                  pg_function,
+                  mask_pg_function,
                   self.outrelation.schema,
                   self.outrelation.name,
+                  self.outsrid,
                   self.outrelation.pk,
                   self.outrelation.coef,
                   True,  # FIXME
                   self.outrelation.temp
                   ])
                 # pridat do volani funkce filtr a typ intersektu
-
-        ep_debug(q)
-        return cur.execute(q)
+        
+        log.debug(q)
+        res = cur.execute(q)
+        log.sql_debug(self.db_connection)
+        return res
 
 
 class SRIDTransformation(OneToOneTransformation):
+    """
+    Transform a table from one SRID to another.
+    """
     def apply(self):
         cur = self.db_connection.cursor()
+        cur.execute('DROP TABLE IF EXISTS {out_schema}.{out_table}'.format(
+                    out_schema=self.outrelation.schema, out_table=self.outrelation.name))
+        self.outrelation.fields = self.inrelation.fields[:]
+        self.outrelation.coef = self.inrelation.coef
+        self.outrelation.srid = self.outsrid
+        in_fields = ','.join(self.inrelation.fields)
+        if self.inrelation.coef:
+            in_fields += (','+self.inrelation.coef)
+
         sql = 'CREATE TABLE "{out_schema}".{out_table} AS SELECT {in_fields}, '\
-              'St_SetSrid(St_Transform(geom, {srid}),{srid}) AS {out_geom} ' \
+              'St_SetSrid(St_Transform({in_geom}, {srid}),{srid}) AS {out_geom} ' \
               'FROM "{in_schema}".{in_table}'.\
               format(in_schema=self.inrelation.schema,
                      out_schema=self.outrelation.schema,
                      in_table=self.inrelation.name,
                      out_table=self.outrelation.name,
-                     in_fields=','.join(self.inrelation.fields),
+                     in_fields=in_fields,
+                     in_geom=self.inrelation.geom_field,
                      out_geom=self.outrelation.geom_field,
                      srid=self.outsrid)
 
-        ep_debug(sql)
+        log.debug(sql)
         return cur.execute(sql)
 
 
-class IntersectTransformation(TwoToOneTransformation):
-    def __str__(self):
-        return 'Intersect: ' + str(self.inrelation) + ' # ' + str(self.inrelation2) + ' ->\n    ' + str(self.outrelation)
+class AreaTransformation(OneToOneTransformation):
+    '''
+    Multiply the emission by area of geometry object
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.has_coef = True
 
     def apply(self):
         cur = self.db_connection.cursor()
+        cur.execute('DROP TABLE IF EXISTS {out_schema}.{out_table}'.format(
+                    out_schema=self.outrelation.schema, out_table=self.outrelation.name))
+        self.outrelation.fields = self.inrelation.fields[:]
+        self.outrelation.coef = self.inrelation.coef
+        self.outrelation.srid = self.inrelation.srid
+        q = 'CREATE TABLE "{out_schema}".{out_table} AS SELECT {in_fields}, '
+        if not hasattr(self.inrelation, 'coef') or self.inrelation.coef == '' or self.inrelation.coef is None:
+            q += 'St_Area({in_geom}) AS {out_coef}, '
+        else:
+            q += '{in_coef} * St_Area({in_geom}) AS {out_coef}, '
+        q += '{in_geom} AS {out_geom} FROM "{in_schema}".{in_table}'
+        sql = q.format(in_schema=self.inrelation.schema,
+                       out_schema=self.outrelation.schema,
+                       in_table=self.inrelation.name,
+                       out_table=self.outrelation.name,
+                       in_fields=','.join(self.inrelation.fields),
+                       in_geom=self.inrelation.geom_field,
+                       out_geom=self.outrelation.geom_field,
+                       in_coef=self.inrelation.coef,
+                       out_coef=self.outrelation.coef,
+                       srid=self.outsrid)
+        log.debug(sql)
+        return cur.execute(sql)
+
+    def cleanup(self):
+        with self.db_connection.cursor() as cur:
+            cur.execute('DROP TABLE "{}".{}'.format(self.outrelation.schema,
+                                                    self.outrelation.name))
+
+class LimitToGridTransformation(MaskTransformation):
+    '''
+    Limits the emission sources to sources intersecting with the grid envelope
+    It can also transforms geometries to output srid.
+    These actions can speedup following transaction for large geometry sets
+    '''
+    parameters = ['inrelation', 'outrelation', 'outsrid']
+
+    def __init__(self, inrel=None, outrel=None, outsrid=None):
+        maskrel = Relation(schema=ep_cfg.db_connection.case_schema, name='ep_grid_env')
+        super().__init__(inrel=inrel, maskrel=maskrel, outrel=outrel, outsrid=outsrid,
+                         mask_type='inside', mask_filters=None)
+
+    def __str__(self):
+        return 'Limit to grid: ' + str(self.inrelation) + ' -> ' + str(self.outrelation)
+
+
+class IntersectTransformation(TwoToOneTransformation):
+    """
+    Intersects input shapes with the assigned geometry sets and calculates
+    the intersect coefficients.
+    """
+    parameters = ['inrelation', 'inrelation2', 'outrelation', 'outsrid', 'normalize']
+
+    def __init__(self, inrel1=None, inrel2=None, outrel=None, outsrid=None, normalize=True):
+        super().__init__(inrel1=inrel1, inrel2=inrel2, outrel=outrel, outsrid=outsrid)
+        self.has_coef = True
+        self.normalize = normalize
+
+    def __str__(self):
+        return 'Intersect: ' + str(self.inrelation) + ' # ' + str(self.inrelation2) + ' -> ' + str(self.outrelation)
+
+    def apply(self):
+        cur = self.db_connection.cursor()
+        self.outrelation.srid = self.outsrid
+        self.outrelation.fields = list(set(self.inrelation.fields) | set(self.inrelation2.fields))
         q = cur.mogrify(
             'SELECT * FROM ep_intersection('
-            '%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s'
+            '%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s'
             ')', [self.inrelation.schema,
                   self.inrelation.name,
                   '{'+','.join([i for i in self.inrelation.fields])+'}',
@@ -119,14 +273,12 @@ class IntersectTransformation(TwoToOneTransformation):
                   self.outsrid, self.outrelation.pk,
                   self.outrelation.geom_field,
                   self.outrelation.coef,
+                  self.normalize,
                   True,  # FIXME
                   self.outrelation.temp])
-
-        ep_debug(q)
+        log.debug(q)
         res = cur.execute(q)
-        ep_debug('Intersect:', res)
-        for n in self.db_connection.notices:
-            ep_debug('Intersect message:',n)
+        log.sql_debug(self.db_connection)
         return res
 
     def cleanup(self):
@@ -134,278 +286,57 @@ class IntersectTransformation(TwoToOneTransformation):
             cur.execute('DROP TABLE "{}".{}'.format(self.outrelation.schema,
                                                   self.outrelation.name))
 
-
-class SimpleMaskTransformation(IntersectTransformation):
-    def __init__(self, inrel=None, mask=None, outrel=None, outsrid=None):
-        super().__init__(outrel=outrel, outsrid=outsrid)
-        self.inrelation = inrel
-        self.inrelation2 = mask
-        self.outrelation = outrel
-
-    @property
-    def inrel(self):
-        return self.inrelation
-
-    @inrel.setter
-    def inrel(self, rel):
-        self.inrelation = rel
-
-    @property
-    def mask(self):
-        return self.inrelation2
-
-    @mask.setter
-    def mask(self, rel):
-        self.inrelation2 = rel
-
-    def apply(self):
-        super().apply(self)
-
-
-class SourcesToGridTransformation(Transformation):
-    def __init__(self, inrel=None, emisrel=None, srcrel=None, actrel=None, esetrel=None, case_schema=None, filters=None):
-        self.inrelation = inrel
-        self.sources_relation = srcrel
-        self.activity_relation = actrel
-        self.eset_relation = esetrel
-        self.case_schema = case_schema
-        if filters is None:
-            self.filters = []
-        else:
-            self.filters = filters
-
-    def __str__(self):
-        return 'Sources to grid transformation: ' + str(self.inrelation)+' -> ' +\
-                str(self.sources_relation)
-
-    def apply(self):
-        cur = self.db_connection.cursor()
-        filters, filter_values, joins = SourceFilterTransformation.parse_filters(self.filters,
-                                                                                 fqn=False)
-        join_texts = ''
-        for j in joins:
-            if j == 'eset':
-                join_texts += (' JOIN "{sch}".ep_emission_sets AS es USING (eset_id)'.format(
-                                sch=self.cfg.db_connection.source_schema))
-            elif j == 'inventory':
-                join_texts += (' JOIN "{sch}".ep_emission_sets AS es USING (eset_id)'
-                               ' JOIN "{sch}".ep_source_files AS sf USING (file_id)'
-                               ' JOIN "{sch}".ep_inventories AS inv USING (inv_id)'.format(
-                                sch=self.cfg.db_connection.source_schema))
-
-        if filters != '' and len(filter_values)!=0:
-            filters = cur.mogrify(filters, filter_values).decode('UTF-8')
-
-        q = cur.mogrify('SELECT * FROM ep_sources_to_grid'
-                        '(%s, %s, %s, %s, %s, %s, %s)',
-                        [self.sources_relation.schema, self.case_schema,
-                         self.sources_relation.name,
-                         self.inrelation.name, self.inrelation.coef,
-                         join_texts, filters])
-        ep_debug(q)
-        return cur.execute(q)
-
-
-class SourceFilterTransformation(OneToOneTransformation):
+class ToGridTransformation(IntersectTransformation):
     """
-    Filter sources by one or more of `_available_filters`
-    Example:
-    SourceFilterTransformation(inrel=Relation(schema='sources',
-                                              name='ep_in_sources'),
-                               outrel=Relation(schema='sources',
-                                               name='my_filter', temp=True),
-                               eset__like='ATEM_1.0*', source_type__eq='P')
-
-    Available filter operators: defined by _sql_operators dictionary
+    Transform input shapes into the output grid.
+    Usually run as the penultimate step in the transformation chain before
+    SourcesToGridTransformation.
     """
-    _available_filters = {'inventory': 'ep_inventories.inv_name',
-                          'eset': 'ep_emission_sets.eset_name',
-                          'source_type': 'ep_in_sources.source_type'}
-
-    def __init__(self, inrel=None, outrel=None, filters=None):
-        super().__init__(inrel=inrel, outrel=outrel)
-        if filters is not None:
-            self.filters = [f for f in filters
-                            if f[0].rsplit('__', 1)[0] in
-                            SourceFilterTransformation._available_filters]
+    def __init__(self, inrel=None, outrel=None, normalize=True, method='Area', mandatory=True):
+        self.method = method
+        self.mandatory = mandatory
+        self.case_schema = ep_cfg.db_connection.case_schema
+        inrel2 = Relation(schema=self.case_schema, name='ep_grid_tz', fields=['grid_id'])
+        super().__init__(inrel1=inrel, inrel2=inrel2, outrel=outrel, normalize=normalize)
 
     def __str__(self):
-        return 'Source filter: ' + str(self.inrelation) + ' -> ' + str(self.outrelation)
-
-    @staticmethod
-    def parse_filters(filters, fqn=True):
-        filter_sql = ''
-        filter_values = []
-        joins = set()
-        for k, v in filters:
-            if filter_sql != '':
-                filter_sql += ' AND '
-
-            col, op = k.rsplit('__', 1)
-            try:
-                sql_op = _sql_operators[op]
-            except KeyError:
-                sql_op = '='
-
-            try:
-                db_col = SourceFilterTransformation._available_filters[col]
-                if not fqn:
-                    db_col = db_col.split('.')[1]
-            except KeyError:
-                continue
-
-            filter_sql += '{col} {op} %s'.format(col=db_col, op=sql_op)
-            filter_values.append(v)
-
-            if col in ('eset', 'inventory'):
-                joins.add(col)
-
-        return (filter_sql, filter_values, joins)
+        return 'ToGrid: ' + str(self.inrelation) + ' -> ' + str(self.outrelation) + ' -> ' + str(self.method)
 
     def apply(self):
+        log.debug("ToGridTransformation apply:", self.method)
+        if self.method == 'Area':
+            super().apply()
+        elif self.method == 'Centre':
+            self.to_center()
+        else:
+            log.debug('Unknown method ' + self.method + ' in to_grid transformation!!!')
+
+    def to_center(self):
         cur = self.db_connection.cursor()
-        select_cols = 'i.*'
-        filters, filter_values, joins = SourceFilterTransformation.parse_filters(self.filters)
-        join_texts = ''
 
-        for j in joins:
-            if j == 'eset':
-                select_cols = 'DISTINCT({})'.format(select_cols)
-                join_texts += (' JOIN "{sch}".ep_in_sources USING (geom_id)'
-                               ' JOIN "{sch}".ep_emission_sets USING (eset_id)'.format(
-                                sch=self.cfg.db_connection.source_schema))
-            elif j == 'inventory':
-                select_cols = 'DISTINCT({})'.format(select_cols)
-                join_texts += (' JOIN "{sch}".ep_in_sources USING (geom_id)'
-                               ' JOIN "{sch}".ep_emission_sets USING (eset_id)'
-                               ' JOIN "{sch}".ep_source_files USING (file_id)'
-                               ' JOIN "{sch}".ep_inventories USING (inv_id)'.format(
-                                sch=self.cfg.db_connection.source_schema))
-
-        if self.outrelation.temp:
-            self.outrelation.schema = ''
-            outrelation_schema = ''
-        else:
-            outrelation_schema = '"' + self.outrelation.schema + '"' + '.'
-
-        self.fullname = outrelation_schema + self.outrelation.name
-        q = 'CREATE OR REPLACE {lifetime} VIEW {fullname} AS SELECT {select_cols} FROM "{inschema}".{inname} AS i {joins}'.format(
-                select_cols=select_cols,
-                lifetime=self.outrelation.lifetime,
-                fullname=self.fullname,
-                inschema=self.inrelation.schema, inname=self.inrelation.name,
-                joins=join_texts)
-
-        if filters != '':
-            q += ' WHERE ' + filters
-
-        self.outrelation.fields = self.inrelation.fields
-        self.outrelation.coef = self.inrelation.coef
-        sql = cur.mogrify(q, filter_values)
-        ep_debug(sql)
-        return cur.execute(sql)
-
-    def cleanup(self):
-        with self.db_connection.cursor() as cur:
-            cur.execute('DROP VIEW {}'.format(self.fullname))
-
-
-class TransformationQueue():
-    def __init__(self, queue_id, inrel, outrel, outsrid=None, outid=None, outgeom=None,
-                 **kwargs):
-        self.queue_id=queue_id
-        self.queue = []
-        self.inrelation = inrel
-        self.outrelation = outrel
-        self.outsrid = outsrid
-        self.outid = outid
-        self.outgeom = outgeom
-        self.schema = 'transformations'
-        self.filters = []
-
-    def __str__(self):
-        return "->\n".join(map(str, self.queue))
-
-    def insert(self, transformation, index=None, *args, **kwargs):
-        if isinstance(transformation, str):
-            transformation = globals()[transformation]()
-            for param in Transformation.parameters:
-                if param in kwargs:
-                    setattr(transformation, param, kwargs[param])
-
-        if not hasattr(transformation, 'db_connection'):
-            transformation.db_connection = self.db_connection
-
-        if not hasattr(transformation, 'cfg'):
-            transformation.cfg = self.cfg
-
-        if not hasattr(transformation, 'rt_cfg'):
-            transformation.rt_cfg = self.rt_cfg
-
-        if index is None or index == -1:
-            self.queue.append(transformation)
-        else:
-            self.queue.insert(index, transformation)
-
-        if hasattr(transformation, 'filters'):
-            self.filters.extend(transformation.filters)
-
-    def append(self, transformation, *args, **kwargs):
-        self.insert(transformation, -1, *args, **kwargs)
-
-    def process(self):
-        numtrans = len(self.queue)
-        filters = None
-        for i, trans in enumerate(self.queue):
-            if i == 0:
-                trans.inrelation = self.inrelation
-            else:
-                transmm = self.queue[i-1]
-                trans.inrelation = transmm.outrelation
-
-            # if issubclass(trans, TwoToOneTransformation):
-            #     trans.inrelation2 = trans.inrelation2
-
-            if i == numtrans-1:
-                trans.outrelation = self.outrelation
-                trans.outsrid = self.outsrid
-                trans.outgeom = self.outgeom
-                trans.outid = self.outid
-            else:
-                if isinstance(trans, IntersectTransformation) or isinstance(trans, MaskTransformation):
-                    mycoef = 'coef{}'.format(i+1)
-                else:
-                    mycoef = ''
-
-                if not hasattr(trans, 'outrelation') or trans.outrelation is None:
-                    myrelname = self.inrelation.name + '_q{}_trans{}'.format(self.queue_id, i+1)
-                    trans.outrelation = Relation(schema=self.schema,
-                                                 name=myrelname,
-                                                 pk='id{}'.format(i+1),
-                                                 geom_field='geom',
-                                                 coef=mycoef,
-                                                 temp=False)
-
-                if not hasattr(trans, 'outsrid') or trans.outsrid is None:
-                    trans.outsrid = self.outsrid
-
-            ep_debug('*** Transformation {:4d}'.format(i), trans)
-            if isinstance(trans, SourceFilterTransformation):
-                filters = trans.filters
-            elif isinstance(trans, SourcesToGridTransformation) and filters is not None:
-                trans.filters = filters
-
-            trans.apply()
-            self.db_connection.commit()
-
-        for trans in self.queue[:-1]:
-            try:
-                trans.cleanup()
-            except AttributeError:
-                pass
-
-        self.db_connection.commit()
-t}, ST_Centroid(g.{geomg})))'.format(
+        # TODO - check geometry dimmension (only dim=2 is allowed)
+        # connect objects to the grids by their centers
+        tgtable = '{}_togridcenter'.format(self.outrelation.name)
+        cur.execute('DROP TABLE IF EXISTS {tgschema}.{tgtable}'.format(
+            tgschema=self.case_schema, tgtable=tgtable))
+        infields = ','.join(['r.'+i for i in self.inrelation.fields])
+        log.debug('to_center infields:', infields)
+        gridfields = ','.join(['g.' + i for i in self.inrelation2.fields])
+        log.debug('to_center gridfields:', gridfields)
+        # FIXME: is the following code prepared for future? Delete otherwise
+        #if self.inrelation.srid == self.inrelation2.srid:
+        #    sqltrans = 'r.{geomt}'.format(geomt=self.inrelation.geom_field)
+        #else:
+        #    sqltrans = format('ST_Transform(r.{geomt},{sridg})',
+        #                      geomt=self.inrelation.geom_field, sridg=self.inrelation2.srid)
+        ic = '1.0' if self.inrelation.coef == '' else 'r.'+self.inrelation.coef
+        oc = self.inrelation.coef if self.outrelation.coef == '' else self.outrelation.coef
+        log.debug('inrelation.coef: ', ic)
+        sqltext = 'CREATE TABLE {tgschema}.{tgtable} AS ( ' \
+                  'SELECT {infields}, {gridfields}, {incoef} AS {outcoef} , g.{geomg} ' \
+                  'FROM {inschema}.{intable} r ' \
+                  'join {gridschema}.{gridtable} g ' \
+                  'on st_intersects(r.{geomt}, ST_Centroid(g.{geomg})))'.format(
                   tgschema=self.case_schema,tgtable=tgtable,
                   infields=infields, gridfields=gridfields, incoef=ic, outcoef=oc,
                   inschema=self.inrelation.schema, intable=self.inrelation.name,
