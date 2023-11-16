@@ -4,7 +4,7 @@ FUME emission processor quick start guide
 0. Download FUME code to the $FUME_ROOT directory
 1. Install PostgreSQL 9.5 and PostGIS 2.2 or newer
 2. Install Python 3.5 or newer
-3. Install Python libraries - required: ConfigObj, NumPy, SciPy, Psycopg 2,
+3. Install Python libraries - required: ConfigObj, NumPy, SciPy, Psycopg2,
                                         GDAL, pint, netCDF4, pygrib, pyproj,
                                         pytz
                             - optional: matplotlib, basemap, shapely, fiona

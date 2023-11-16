@@ -1,4 +1,5 @@
 \documentclass[a4paper,11pt]{article}
+\usepackage{dirtree}
 \usepackage{lmodern}
 \usepackage{amssymb,amsmath}
 \usepackage{ifxetex,ifluatex}
@@ -26,12 +27,20 @@
             pdfborder={0 0 0},
             breaklinks=true}
 \urlstyle{same}  % don't use monospace font for urls
-
+\usepackage{graphicx}
 
 \setlength{\emergencystretch}{3em}  % prevent overfull lines
 
 \setlength{\parskip}{0.6\baselineskip}%
 \setlength\parindent{0pt}
+
+\usepackage{fancyvrb}
+\usepackage{tabularx}
+  
+  \newenvironment{conditions}
+  {\par\noindent
+   \tabularx{\columnwidth}{>{$}l<{$} @{\: \dots \:} >{\raggedright\arraybackslash}X}}
+  {\endtabularx\par}
 
 % set margins
 \RequirePackage{geometry}
@@ -56,20 +65,18 @@
 \section{Introduction}\label{introduction}
 
 The emission processor FUME (Flexible Universal Processor for Modeling Emissions) has been
-developed by a consorcium of Czech Technical University (CIIRC and
+developed by a consortium of Czech Technical University (CIIRC and
 Transportation Faculty), Czech Hydrometeorological Institute and Department of
 Atmospheric Physics, Faculty of Mathematics and Physics, Charles
-University, Prague, under support of Technological Agency of the Czech
+University, Prague, under the support of the Technology Agency of the Czech
 Republic.
 
-The main and primary task of the FUME emission processor is to produce inputs for air quality
-models. The software has been designed to process data from different sources they are in different spatial resolution and geometries, in different file formats and units with different naming conventions, etc. with as low user data preparation as possible. The inputs are preprocessed and unified to do chemical speciation, space and time disaggregation of emissions. Then the data are exported as emission fluxes time series in model grid as CTM-ready inputs. 
-FUME supports GIS technology and is not restricted to regular 2D or 3D grids and its
-outputs thus may be used for survey and reporting tasks, e.g. for administrative units or other
+The primary task of the FUME emission processor (EP) is to produce emission inputs for air quality (AQ) models. The software has been designed to process data from different sources in different spatial resolutions and geometries, different file formats and units with different naming conventions, etc. with as low user data preprocessing as possible. Inside FUME, the inputs are preprocessed and unified into a common data structure. Then the chemical speciation, space and time disaggregation of emissions are calculated. Further, the data can be exported as emission flux time series in the model grid as CTM-ready inputs. 
+FUME uses GIS technology and is thus not restricted to regular 2D or 3D grids; its
+outputs may be used for surveys and reporting tasks, e.g. for administrative units or other
 partitioning defined by the user.
 
 The functionalities include:
-
 \begin{quote}
 \begin{itemize}
 \item
@@ -79,15 +86,17 @@ The functionalities include:
 \item
   link to GIS data
 \item
-  support for air quality models CMAQ, CAMx and PALM
+  support for AQ models CMAQ, CAMx and PALM
 \item
-  possibility to include external modules (support for MEGAN biogenic emission model is implemented)
+  possibility to include emissions from external models: full support for MEGAN biogenic emission model is implemented; two experimental modules are also included - for emissions from heating and livestock-dependent emissions from agriculture
 \item
   coupling with numeric weather models ALADIN and WRF
 \item
   emission scenarios
 \item
-  simple visualisation possibility
+  emission weighting based on the surrogate approach
+\item
+  simple visualization possibility
 \end{itemize}
 \end{quote}
 
@@ -96,275 +105,162 @@ scripts operate on the database and GIS data and the system is highly
 flexible and configurable.
 
 
-\section{Structure of the emission processing
-system}\label{structure}
+\section{Structure of the emission processing system}\label{structure}
+The important aspects during software design were flexibility and generality to allow its easy future development and expandability. It is not tied to any national setting and is usable for different geographic locations and domain extent and resolution. The emission processor is a complex, heterogeneous system with a modular structure. Expandability is assured by a unified inner structure of input data and unified module interfaces. The unified inner structure allows flexibility in input data format. E.g. in case the user needs to input data in a format currently not supported, it is easy to include a user module to import the data to the database. Due to its unified inner structure, it is not necessary to change any other parts of the processor. Similarly, it is possible to implement a postprocessor class for a new output format. The computational core is realized by configurable chains enabling it to process different source groups individually. 
 
-The emission processor is a complex, heterogeneous system consisting of
-many submodules of different character. These submodules treat different tasks needed during the emission processing for air quality models.
+A typical workflow of the emission processor consists of three main phases: 1) import of input data into the database, 2) core computations for defined cases and execution of external modules, and 3) writing into requested output files. This workflow respects the modular structure and is configurable so that the user can run each workflow process independently.
+
+The emission processor uses a server-client architecture to perform most of the
+tasks. The server holds the database with input and auxiliary data, the client
+is used to configure and execute the tasks which should lead to transforming the
+input data to desired emission outputs.
+
+The processor implements the widely accepted disaggregation model for
+emission flows:
+\begin{equation*}
+ E(p,l,t,s) = \sum_{i} \sum_{c}Z(i,r,c) \cdot q_{p}(i,p) \cdot q_{l}(r,l,c) \cdot q_t(t,c) \cdot q_c(r,s,c) \cdot q_s(r,c),
+\end{equation*}
+where
+\begin{conditions}
+E(p,l,t,s) & output emission flow for a polygon $p$ (typically a grid cell), vertical level $l$, time $t$ and output species $s$ \\
+Z(i,r,c) & primary emission of emitted species $r$ from source $i$ and category $c$\\   
+q_p(i,p) & spatial disaggregation coefficient from source $i$ into polygon $p$ \\
+q_l(r,l,c) & vertical disaggregation coefficient for emitted species $r$ from category $c$ into vertical level $l$ \\
+q_t(t,c) & time disaggregation coefficient for category $c$ into time $t$ \\
+q_c(r,s,c) & chemical speciation coefficient for emitted species $r$ and for category $c$ into output species $s$ \\
+q_s(r,c) & emission scenario coefficient for emitted species $r$ and for category $c$ \\
+\end{conditions}
+
+The spatial disaggregation coefficients are calculated internally based on the area ratio the source occupies in the output polygon. Other disaggregation coefficients are based on user-provided input data.
+
+For certain types of emission sources, this model is not appropriate,
+e.g. biogenic emissions, emissions from lightning, etc. For those cases,
+special models exist, which are based on the domain knowledge. These are
+naturally out of the scope of FUME and an interface has been built into FUME
+for external models to provide a possibility to include different external models. Currently, the MEGAN biogenic emission model has 
+built-in support in FUME.
 
 The processor has been designed so as to
 keep the vast majority of the code independent of any particular air
 quality model. The coupling to the target AQ model is left to the very
-end of processing chain. Thus the outputs of FUME may be used for
-Eulerian CTMs (CAMx and CMAQ supported so far) but the adaptation to
-Lagrangian and Gaussian models may be achieved with no overhead efforts.
-This approach has been applied for processing sources as well as for
-spatial and temporal processing of emissions, speciations and final
-generation of emission flows.
+end of the processing chain. Thus the outputs of FUME may be used for
+Eulerian CTMs but the adaptation to Lagrangian and Gaussian models may be achieved with little to no overhead efforts.
 
-The processor implements the widely accepted disaggregation model for
-emission flows:
-
-T(p,l,t,s) = Sum\_\{i,j\} {[} Z(i,j).q\_p (i,j).q\_l (i,j).q\_t
-(i,j).q\_s (i,j) {]},
-
-where T(p,l,t,s) is output emission flow for a given polygon p, vertical
-level l, time t and output species s,
-
-Z(i,j) is a primary emission of emitted species j from source i
-(typically in tons per year) q p (i,j) disaggregation coefficient for
-emitted species j from source i into polygonu p q l (i,j) disaggregation
-coefficient for emitted species j from source i into vertical level l q
-t (i,j) disaggregation coefficient for emitted species j from source i
-into time t q s (i,j) disaggregation coefficient for emitted species j
-from source i into output species s.
-
-For certain types of emission sources this model is not appropriate,
-e.g. biogenic emissions, emissions from lightning etc. For those cases
-special models exist, which are based on domain knowledge. These are
-naturally out of scope of FUME and an interface has been built into FUME
-for external models. Currently the MEGAN biogenic emission model has a
-built-in support in FUME.
-
-Emisson processor uses server-client architecture to perform most of the
-tasks. Server holds the database with input and auxiliary data, client
-is used to configure the tasks which should lead to transforming the
-input data to desired emission outputs (typically for the use by CTM).
-
-\emph{PLUME RISE?}
-
-\emph{NH3, lightning?}
-
-To accomplish a simulation, the user needs to
-
-\begin{itemize}
-\item
-  define the output grid
-\item
-  manage the sources specification (see ``Treatment of emission sources
-  below''). All of the specified sources will be included into
-  processing
-\item
-  define the transformation chains. During this step any filtering and
-  masking of the sources will be done
-\item
-  run the simulation. All emission outputs will be summed up and added
-  to the user grid. Two files will be output (unless supressed) - Area
-  emissions and Point emissions.
-\end{itemize}
-
-It is the responsibility of the user to make sure that no erratic
-overlapping of emission outputs will occur. For example, if one uses
-finer inventories for the domain of interest while for the background a
-coarser inventory is available, the user has to mask out the finer
-domain from the coarser inventory. So far, the system doesn't detect
-these situations nor does produce any warnings of this kind.
-
-Typical workflow contains following steps:
-
-\begin{itemize}
-\item
-  only done once: - downloading code - setting up the database server
-\item
-  done regularly: - configuring processor - running the processor
-\end{itemize}
+Basic parts of the processor, their dependencies, and data flows among them are shown in Fig. \ref{fig_schema}. 
+\begin{figure}[!h]
+\centering
+\caption{FUME schema}\label{fig_schema}
+\includegraphics[width=\textwidth]{figures/FUME\_schema\_EN.pdf}
+\end{figure}
 
 \section{Installation}\label{installation}
-Os windows
+FUME is based on freely available tools. Theoretically, it is a multiplatform software, although given its predominant use as a source of input data for meteorological and chemical transport models it is primarily intended for and tested on Linux HPC (high-performance computing) systems.
+
+This section describes the process of installation and setting up. This process is usually performed only once, then the system is prepared for routine use. {\em Please, note that the actual commands used to perform individual steps might be different based on the system configuration.}
 
 For the context of the user documentation following conventions are
 being used:
 
-FUME\_ROOT specifies the FUME codebase directory (typically the local
-git repository clone) FUME\_CASE specifies the run directory for the
-user case outside of the FUME codebase
+\verb|FUME_ROOT| specifies the FUME codebase directory (typically the local
+git repository clone) \\ 
+\verb|FUME_CASE| specifies the run directory for the
+user case outside of the FUME codebase, (typically the input and output data, configuration files) \\
+\verb|command line commands| are written in special font 
 
-Prerequisities:
-
+The core software needed for FUME consists of:
 \begin{itemize}
 \item
-  python3 (3.5 or higher)
+  Python3 (3.6 or higher)
 \item
-  database server: packages postgresql, postgresql-contrib 9.5 or newer
+  database server PostgreSQL 10 or higher (tested on 10.23).
 \item
-  postgis (version 1.5.3 tested)
+  PostGIS (version 2.4 and newer tested)
 \end{itemize}
 
-Other libraries for python
-
+Additional libraries for python
 \begin{itemize}
 \item
   pip, pyproj, psycopg2, pygrib, netcdf4, gdal, pint, configobj, scipy,
-  pytz, numpy, python-cdo
+  pytz, numpy, cdo (only used for MEGAN)
 \end{itemize}
 
 Optional libraries for plotting (only necessary when EmissPlotter
 postprocessors are used)
-
 \begin{itemize}
 \item
-  \textbf{matplotlib}, basemap, shapely, fiona
+  matplotlib, basemap, shapely, fiona
 \end{itemize}
 
-Some of the python packages mentioned above may not be present depending
-on distribution. They may be installed via pip or the native package
-manager, e.g. on SUSE:
-
+Some of the Python packages mentioned above may not be present depending on distribution. They may be installed via pip, e.g.:
 \begin{verbatim}
- pip install configobj zypper install python3-psycopg2
+ pip3 install configobj python3-psycopg2 pytz
 \end{verbatim}
 
-Extension for pip3: 
-
-\begin{verbatim}
- pip3 install pytz
-\end{verbatim}
-
-If using the anaconda distribution, it may be necessary to use
-conda-forge:
-
+If using the anaconda distribution, it may be necessary to use conda-forge, e.g.:
 \begin{verbatim}
  conda install -c conda-forge pygrib pint gdal
 \end{verbatim}
 
-On some linux distributions a repository must be added, e.g. on SUSE
-leap 42.2:
-
+\subsection{FUME installation and running}\label{fume-installation}
+FUME is available from a GitHub repository at \url{https://github.com/FUME-dev/fume}. It is possible to download a zip archive or clone the git repository (need to install git first):
 \begin{verbatim}
-zypper addrepo
-\url{http://download.opensuse.org/repositories/Application:Geo:Staging/openSUSE_Leap_42.2/Application:Geo:Staging.repo}
-zypper refresh zypper install postgresql94-postgis zypper refresh zypper
-install postgresql94-postgis
+git clone https://github.com/FUME-dev/fume.git
+\end{verbatim}
+Then the updated versions can be downloaded by
+\begin{verbatim}
+git pull
 \end{verbatim}
 
-Tools for administration and visualisation
-
-\begin{itemize}
-\item
-  qgis (+ python-qgis) for data manipulation
-\item
-  pgadmin3 (access to databases)
-\end{itemize}
-
-Installation of FUME from github (nebo z jineho mista?)
-
-\begin{itemize}
-\item
-  downloading FUME git pull from git repository of emisproc
-\item
-  budeme umoznovat tarball ?
-\end{itemize}
-
-\section{Quick start}\label{quick-start}
-
-If not already started, start (possibly as root) the postgres sql server
-
+The next step is to initialize the PostgreSQL database server and import FUME functions. If not already started, start the server, e.g.:
 \begin{verbatim}
  systemctl start postgresql 
 \end{verbatim}
-or possibly with version number: 
-\begin{verbatim}
- systemctl start postgresql-9.6
-\end{verbatim}
 
+Helper scripts are bundled in the \verb|$FUME_ROOT/server| directory.
 
-Create database:
-
-\begin{itemize}
-\item
-  You have to either copy intialization scripts in directory
-  \emph{server} somewhere where user postgres can read it or give user
-  postgress read access to server directory, e.g.
-\end{itemize}
-
+\subsubsection{Initialization of the PostgreSQL database}
+For most users running \verb|ep_create_database.sh| under the \verb|postgres| user should take care of all database initialization needs. This script creates the database, the database user, and sets the roles for this user. In the default configuration, the \verb|postgres| user may lack access to the \verb|$FUME_ROOT/server| directory. In this case, either give the \verb|postgres| user the read access to this directory or copy the files in the \verb|server| directory to a location accessible by the \verb|postgres| user, e.g.
 \begin{verbatim}
 cp -ra emisproc/server /var/lib/pgsql/
 \end{verbatim}
-
-as root on SUSE-based linuxes
-
-\begin{itemize}
-\item
-  Switch to user ``postgres'':
-\end{itemize}
-
+Switch to user postgres, e.g.:
 \begin{verbatim}
 sudo -u postgres -i
 \end{verbatim}
-
-or if you don't use sudo:
-
-\begin{verbatim}
-su; su - postgres
-\end{verbatim}
-
-\begin{itemize}
-\item
-  run the script
-\end{itemize}
-
+Then run the script
 \begin{verbatim}
 $FUME_ROOT/server/ep_create_database.sh
 \end{verbatim}
 
 Alternatively instead of running the script:
-
 \begin{verbatim}
-sudo su - postgres createuser -P username \# asks for password createdb
--E UTF8 -O username [database-name] createlang postgis
-[database-name] createlang postgis_topology [database-name]
-createlang intarray [database-name] psql -d [user] -c ``grant
-all on database [database-name] to [user] with grant option;''
-(PostgreSQL syntax for adding full privileges to [user] for database
-[database-name]) psql -d [database-name] -c ``grant all on
-spatial_ref_sys to [user];''
+sudo su - postgres createuser -P username # asks for password
+createdb -E UTF8 -O username [database-name]
+createlang postgis [database-name] 
+createlang postgis_topology [database-name]
+createlang intarray [database-name] 
+psql -d [database-name] 
+   -c "grant all on database [database-name] to [user] with grant option;" 
+psql -h [hostname] -p [port] -U [user] -d [database-name] -f ep_create_database.sql;
+psql -d [database-name] -c "grant all on spatial_ref_sys to [user];"
 \end{verbatim}
 
-logout from the database, the rest is done under the account \emph{username}
-
-\begin{verbatim}
-cd $FUME_ROOT/server
-
-psql -h hostname -p port -U username [-W] -d dbname -f ep_create_database.sql
-\end{verbatim}
-
-Run the emission processor:
-
-Create a working directory FUME\_CASE (can be changed). For the test
-case, copy example configuration files from
-\$FUME\_ROOT/doc/example-config
-
-\begin{verbatim}
-cd $FUME_CASE
-\end{verbatim}
-
-and run, generally
-
+\subsubsection{Running the emission processor and test cases}
+Create a working directory \verb|FUME_CASE| (can be changed). 
+To run FUME, generally write
 \begin{verbatim}
 python3 $FUME_ROOT/client/fume [-c main_config] [-w workflow_config]
 \end{verbatim}
+This assumes that all the input data and configuration files are prepared and gathered in the \verb|FUME_CASE| directory. How to prepare the main configuration file and workflow file is described in section \ref{user-configuration}. The basic structure of input data is in \ref{input-data}.
 
-In particular for the test case provided with the distribution 
+For the user's convenience, data and configuration files for two example test cases are available along with the FUME source code showing most of the processor's capabilities while also providing suitable configuration templates. The first test case shows a simple operational forecast configuration for a simulation in Europe based on a combination of regional-scale emission data from CAMS/EMEP databases and local emissions for the Czech Republic. It features all the main processor modules: input data import, geographical transformations, application of simple scenarios, speciation and temporal disaggregation, and output into CAMx and CMAQ area emission files. The second case focuses on a micro-scale workflow for the preparation of emission inputs for an LES model PALM. It presents a typical usage of the transformations, preparation of 3D emissions, and utilization of the PALM output module. The test cases can be downloaded as tar archives via \url{https://doi.org/10.48700/datst.bf6s2-5tq48}. To run the test case simply run \verb|run_fume_tutorial_regional.sh| or \verb|run_fume_tutorial_palm.sh|.
 
-\begin{verbatim}
-python3 $FUME_ROOT/client/fume -c fume_run.conf -w fume_workflow.conf
-\end{verbatim}
+\subsection{Database}\label{database}
+It is completely possible to use FUME without any direct interaction with the database. For experienced/interested users here are some tips.   
 
-\section{Database}\label{database}
-It is completely possible to use FUME without any direct interaction with the database. For experienced/interested user there are some tips.
+There are several graphical tools that allow access and administration of the PostgreSQL server and databases e.g. pgAdmin and DBeaver. 
 
 The database structure of an emission database contains several schemas:
-
 \begin{itemize}
 \item
   case schema
@@ -378,26 +274,10 @@ The database structure of an emission database contains several schemas:
   topology schema
 \end{itemize}
 
-Normally the user doesn't need to change the schemas. Currently the
-schemas conf\_test, static\_test, sources\_test and case\_test are
-provided and all what is needed is to name them in the main
-configuration file.
-
-Advanced users may create their own schemas and specify single schemas
-for each run in the main configuration file (fume\_run.conf), e.g.
-
-In the sources schema, each ``atomic'' source in the raw file has a
-unique identifier of source (source\_orig\_id) and geometry
-(geom\_orig\_id). Different esets are then created by grouping the
-identifiers. These tables are created during processing:
-{[}schema{]}.ep\_in\_sources, {[}schema{]}.ep\_in\_emissions,
-{[}schema{]}.ep\_in\_geometries.
-
-Under ordinary circumstances it is not necessary to optimize any
-settings or configuration of postgres database. Had the import of data
-or saving data to tables taken too long, it is possible to switch off
-the autovacuum daemon in /var/lib/postgresql.conf.
-
+In the example configurations, the
+schemas \verb|conf_test|, \verb|static_test|, \verb|sources_test| and \verb|case_test|
+are set up and all that is needed is to include them in the main
+configuration file (\verb|fume_run.conf|) like so:
 \begin{verbatim}
  conf_schema = conf_test 
  static_schema = static_test 
@@ -405,260 +285,702 @@ the autovacuum daemon in /var/lib/postgresql.conf.
  case_schema = case_test 
 \end{verbatim}
 
-This means (among others) that the user can modify some parts of the
-simulation without the necessity of running all processing from scratch.
+It is possible to create different custom schemas and specify a single schema
+for each run in the main configuration file. 
+This allows the user to modify some parts of the
+simulation without the necessity of running all processing from scratch. It also allows to create different case calculations on the basis of the same source data (e.g. for different domains, models etc.) by keeping previous configuration, static, and source schemas intact and only changing the name of the case schema.
 
-\section{Input data}\label{input-data}
+In the sources schema, each ``atomic'' source in the raw file has a
+unique identifier of source (\verb|source_orig_id|) and geometry
+(\verb|geom_orig_id|). Different {\em emission sets} ({\em esets}) are then created by grouping the
+identifiers. These tables are created during processing:
+\verb|[schema].ep_in_sources|, \verb|[schema].ep_in_emissions|,
+\verb|[schema].ep_in_geometries|.
 
-Input data are typically located in the directory \$FUME\_CASE, which is
-the user case run directory. The input directory contains inventories,
-meteo inputs and static data like speciacions and time schedules.
-
-\subsection{Example test case}\label{example-test-case}
-
-For the test case provided with the distribution, input data are
-downloadable from \ldots{} After the download you should see the
-following structure:
-
-\begin{verbatim}
-example_data
-../input
-../output
-fume_run.conf
-fume_transformations.conf
-fume_workflow.conf
-\end{verbatim}
-
+Under ordinary circumstances, it is not necessary to optimize any
+settings or configuration of the  Postgres database. In cases when the import of data
+or saving data to tables takes too long, it is recommended to switch off
+the autovacuum daemon in \verb|/var/lib/postgresql.conf|.
 
 \section{User configuration}\label{user-configuration}
+The user configuration is done using the Python ConfigObj syntax. It allows easy configuration by means of a text file. The parameter values are given simply by \verb|parameter_name = parameter_value|. The structure is divided into sections and subsections named in squared brackets. \texttt{\#} is used as a comment symbol. For examples of configuration files see example cases provided with the distribution (see section \ref{example-test-case}) and example configuration files that are provided in the \verb|$FUME_ROOT/doc/example-config| directory. Full configuration of specification files
+(templates) are located in the directory \verb|$FUME_ROOT/client/conf|. 
 
-As mentioned above, user configuration typically resides in the
-\$FUME\_CASE directory, however, the user can specify any path to the
-main configuration file with the \texttt{-c} option (defaults to
-\texttt{fume\_run.conf}) and the path to the workflow configuration file
-with the \texttt{-w} option (defaults to \texttt{fume\_workflow.conf}).
-In the distribution, example configuration files are provided in the
-doc/example-config directory and full configuration specification files
-(templates) are located in the directory client/conf.
+There are different configuration files. The two mandatory files are the main configuration file with different run parameters (see section \ref{main-config}) and the workflow file that defines which parts of the process should be run (see section \ref{workflow}). Then there is a configuration file that includes information about emission sources to be imported (section \ref{config-sources}) and a transformation configuration file that allows to filter, mask and combine imported sources in the configured case (section \ref{transformations}) and two other configspec files for CMAQ output and for FUME built-in plotter functions (only needed when the respective modules are run).
 
-There is one main configuraion file, typically named fume\_run.conf. The
-name may be supplied via the \texttt{-c} option to the main executable
-\texttt{fume}.
+\subsection{Main configuration file}\label{main-config}
+There is one main configuration file (default name \verb|fume_run.conf|). The
+name may be supplied via the \verb|-c| option to the main executable
+\verb|fume|. A template for this file including all valid specifications is the file
+\verb|client/conf/configspec.conf|, where the user can find short descriptions of all parameters and default values if provided. In case the default value fits or the parameter is not relevant to the user case it does not need to be listed in the user config file.
 
-A template for this file including all valid specifications is the file
-\texttt{client/conf/configspec.conf}.
-
-There are three other configuration files, namely:
-
-\emph{VYJASNIT STRUKTURU konfiguraku} \emph{mohou se uz includovat?}
-
+The main config file contains the following specifications:
 \begin{itemize}
-\item
-  fume\_workflow.conf
-\item
-  fume\_transformations.conf
-\item
-  configspec-sources.conf
-\item
-  configspec-cmaq.conf
-\end{itemize}
-
-The definitions (syntax) of any valid transformation is in the file
-config/transformations/configspec-transformations.conf. Using these
-definitions, the users may create their own file e.g.
-fume\_transformations.conf where user-defined transformations are
-defined. These may then appear in transformation chains (see below).
-
-configspec.conf contains the following specifications:
-
-\begin{itemize}
-\item
-  paths to input data, in particular inventories, static data,
-  meteorology files, biogenic emisssion files
-\item
-  parameters for connecting the PostgreSQL database
 \item
   parameters for connecting the PostgreSQL database and names of schemas
 \item
-  specifications of grids in meteorological inputs as well as output
-  user grid
+  paths to input data, in particular inventories, static data, and meteorology files if relevant
 \item
-  projection parameters (tady neni jasne ktereho gridu se projekce tyka)
-\item
-  output specifications
+  specifications of grids and projections of the user case
 \item
   transformation chains to be performed
+\item
+  selection of the chemical mechanism and time span of the simulation  
+\item
+  external models to be run
+\item
+  output specifications
 \end{itemize}
 
-\textbf{Treatment of emission sources}
+The following example shows a typical ``minimal'' main config file with the most important and frequent parameters. The purpose of this example is to give a quick overview for the new users.
+\begin{verbatim}
+scratch = True
 
-In order to minimize the efforts needed for incorporation of
+[db_connection]
+host = localhost
+port = 5432
+user = fume_test
+database = fume_test
+
+conf_schema = fume_conf
+static_schema = fume_static
+source_schema = fume_sources
+case_schema = test_case
+
+[input_params]
+path = input
+static = ${path}/static_data
+emission_inventories = ${path}/inventory_input.txt
+
+[[speciation_params]]
+gspro_files = gspro_CB05.csv, gspro_CF.csv
+
+[projection_params]
+projection_proj4 = '+proj=lcc +lat_1=46.24470064 +lat_2=46.24470064 +lat_0=46.24470064 
+        +lon_0=17 +x_0=0 +y_0=0 +a=6371229 +b=6371229 +units=m +no_defs'
+
+[domain]
+grid_name = CAMx_d01_grid
+delx = 14131.863282
+dely = 14131.863282
+xorg = -141318.632996    # domain center
+yorg = 254373.538978     # domain center
+nx = 171
+ny = 135
+
+[transformations]
+source = 'fume_transformations.conf'
+[[chains]]
+tno_data=tno
+# all=,
+
+[run_params]
+[[speciation_params]]
+chem_mechanisms = CB05, CF
+
+[[time_params]]
+dt_init = 2015-01-01 0:00:00
+num_time_int = 25
+timestep = 3600
+
+[[output_params]]
+model = 'CAMx'
+model_version = "v_4.0"
+
+[postproc]
+processors = postproc.camx.CAMxAreaWriter
+
+[[camxareawriter]]
+outfile='output/camx_test_area'    
+\end{verbatim}
+
+Running FUME with this config file sets a completely new case (\verb|scratch = True|) and erases all data previously imported into the schemas (if any). Section \verb|db_connection| contains the database information --- this needs to be adapted based on data used during FUME installation (sec. \ref{fume-installation}). The schema names are arbitrary. The \verb|static_schema| contains ``static'' data independent of user case (time zones information at this moment), \verb|conf_schema| holds mostly case-related data like definitions of the speciation mechanisms, time factors, chemical models definitions, etc., \verb|source_schema| contains information about the imported emission sources and \verb|case_schema| contains data on the actual case calculations e.g. grid, sources speciated according to the selected mechanism, time factors for selected time span etc. The first three schemas hold user-provided data imported during the import process, while the \verb|case_schema| holds runtime calculations generated based on the actual case setting. It is possible to have more schemas concurrently to hold different data/runs. It is also possible to have more case schemas related to the same data schemas, e.g. in the case the user wants to run calculations for the different output grids on the same data. 
+
+Section \verb|input_params| contains paths and names of the input data. Sections \verb|projection_params| and \verb|domain| define the grid and projection of the case and output data. Next, section \verb|transformations| defines which of the imported source data should be used in the case and allows to apply filters, masks, scenarios, and surrogates on the sources (see section \ref{transformations}). This example shows a simple case of one transformation chain. The name of the chain is arbitrary and the chain itself has to be defined in \verb|fume_transformations.conf|. It is possible to process all of the imported sources without applying any transformations. This is demonstrated by the commented line \texttt{all=,}.
+
+Section \verb|run_params| sets the chemical mechanism, time span and AQ model to be calculated. The \verb|postproc| section allows the user to define different output formats for the data.
+
+Any paths used in the config file for output (and other) files have to exist before the program run. The program does not create non-existent and other paths.
+
+\subsection{The workflow}\label{workflow}
+The second configuration file necessary to run FUME is the workflow file. The default name is \verb|fume_workflow.conf|, but the path and name can be passed to the main executable via the \verb|-w| option. In the workflow configuration file the user may specify the list and order of the modules to be run in the simulation. Below is an example of a full-run workflow file.
+\begin{verbatim}
+input.init_static                              
+input.import_sources       
+case.prepare_conf                  
+case.create_new_case                           
+transformations.prepare                        
+transformations.run                            
+case.process_point_sources                     
+case.collect_meteorology                       
+case.process_case_spec_time  
+case.process_vertical_distributions
+case.preproc_external_models                   
+case.run_external_models                       
+postproc.run                                   
+\end{verbatim}
+\begin{description}
+    \item [input.init\_static] imports static and configuration data, i.e. fills the \verb|conf_schema| and \verb|static_schema|
+    \item [input.import\_sources] imports emission sources, for configuration of this import see section \ref{emiss-sources} 
+    \item [case.prepare\_conf] initializes the geometry projection and grid, this step always needs to be run as long as any following step is turned on 
+    \item [case.create\_new\_case] initializes the case
+    \item [transformations.prepare] initializes the transformations, for configuration of the transformations see section \ref{transformations}
+    \item [transformations.run] apply the transformation queues
+    \item [case.process\_point\_sources] performs point sources specific calculations, at this moment only filling of stack parameters
+    \item [case.collect\_meteorology] imports necessary meteorology data, which are used in external model calculations. In case no external model is included, or it does not need meteorology data, this step can be commented out (for external models information see section \ref{external-models}).
+    \item [case.process\_case\_spec\_time ] calculates and applies chemical speciation split factor, and pre-calculates time disaggregation factors. Time factors are applied later in the output module for performance reasons.
+    \item [case.process\_vertical\_distributions ] calculates the vertical distribution factors for the output vertical grid structure, the output emission categories, and speciated output species (the vertical distribution factors are however applied during the output file generation)
+    \item [case.preproc\_external\_models] preprocessing for external models, i.e. calculations needed to be done only once, typically some domain-specific processes, (for external models information see section \ref{external-models}).
+    \item [case.run\_external\_models] run external models for defined time steps (for external models information see section \ref{external-models}).
+    \item [postproc.run] runs selected postprocessors. The description of output configuration is in section \ref{output}.
+\end{description}
+
+Generally, changing the order of the workflow is not recommended.
+It is possible to leave or comment out some
+steps of the simulation which are thus skipped by the processor. This
+enables the user to run or tune a subset of steps without having to go through all
+the processes every time. A typical example can be the separation of the data import process (first two lines), geographical transformations, and time-dependent output. A typical case is a daily operational run. The data import can be performed only once (e.g. for one year based on yearly emission totals) and then, based on this data, different cases can be initialized and finally, only the time-dependent postprocessing part can be run repeatedly on a day-by-day basis. It may be necessary to adjust the scratch parameter in the main config file accordingly. The only step that cannot be skipped (unless only a data import is performed) is \verb|case.prepare_conf|.
+
+\section{Input data}\label{input-data}
+To run a custom simulation the users have to prepare their own datasets. This basically consists of the configuration data and emission sources information. In the main configuration file, the section relevant to input data import is \verb|input_params|. The input directory contains emission inventories, meteorological inputs, and configuration data like speciations and time schedules. Generally, keep in mind that the processor is case-sensitive.
+
+As a starting point, the distribution offers two example cases to show the basic features of the software and the structure of the input data.
+
+\subsection{Example test case}\label{example-test-case}
+For the test case provided with the distribution, input data are
+downloadable from \url{https://doi.org/10.48700/datst.bf6s2-5tq48} After the download you should see the
+following structure:
+\dirtree{%
+ .1 example\_data/.
+ .2 input/.
+ .2 output/.
+ .2 fume\_run.conf.
+ .2 fume\_transformations.conf.
+ .2 fume\_workflow.conf.
+}
+
+\subsection{Static and configuration data}\label{static-data}
+Configuration and static data are located in the input directory given by the \verb|static| parameter, while the parameter \verb|path| can be used to define the data directory to simplify the writing of paths to other subdirectories. The default value of the \verb|path| parameter is \verb|./input|. The default for \verb|static| is set to be the same as \verb|path|. In this directory, there has to be a subdirectory \verb|static_data| with all the static and configuration data. The structure of this directory is fixed and cannot be changed. 
+\dirtree{%
+ .1 input/.
+ .2 static\_data/.
+ .3 shp/.
+ .4 tz\_world\_mp.dbf.
+ .4 tz\_world\_mp.prj.
+ .4 tz\_world\_mp.shp.
+ .4 tz\_world\_mp.shx.
+ .3 speciations/.
+ .4 gspro\_AE4.csv.
+ .4 gspro\_CB05.csv.
+ .4 mechanism\_list.csv.
+ .4 model\_specie\_names.csv.
+ .4 sp\_species.csv.
+ .3 time\_var/.
+ .4 tv\_def.csv.
+ .4 tv\_mapping.csv.
+ .4 tv\_series.csv.
+ .4 tv\_values.csv.
+ .3 activity\_units.csv.
+ .3 emission\_categories.csv.
+ .3 inventory\_species.csv.
+ .3 model\_list.csv.
+}
+In the shp subdirectory, there is a \verb|tz_world_mp| shapefile distributed with the software. This file defines the time zone information used to deal with time shifts due to different source locations. Typically, there is no need to change this file. 
+
+All configuration files are comma-separated text files (quotation marks can be used to mark character strings). The files have one header row, with mandatory given column names. The order of the columns is arbitrary, additional columns may be present. The only exception are the {\em gspro} files, which have a fixed format. Empty rows or rows beginning with comment character \# are ignored. 
+
+\subsubsection{General definitions inputs}\label{general-definition-inputs}
+All files with general input definitions are expected to be in a directory
+defined in \verb|static| parameter. This includes the definition of inventory species, source emissions categories, a list of possible output models, and an optional file for defining activity data units.
+
+\paragraph{inventory\_species.csv} 
+is a list of input emission species, known internally by FUME, a simple list of species that can be on input. The file has two columns: {\em name}, and {\em description}. The name defines the species name, the description can be empty. Example:
+\begin{verbatim}
+name,description
+SO2,sulphur dioxide
+NO,nitrogen monooxide   
+NOX,
+\end{verbatim}
+This is a unified internal name of the species. The naming conventions can be different between different emission inventories. To unify the different input names the mapping file for each inventory has to be given (see section \ref{emiss-sources}). This allows to unify naming conventions across inventories like PM25, PM2\_5 to be treated as one species under one name.
+All species used in speciations as inventory species or in \verb|calculate_pollutants| file must be listed here.
+
+\paragraph{emission\_categories.csv}
+defines the emission category (tree) hierarchy, known internally by EP.
+Similarly to species, those categories are unified across different
+inventories through mapping file (see section \ref{emiss-sources}). The file has
+three columns: {\em cat\_id}, {\em name}, {\em parent}. {\em cat\_id} is category id, it is an integer
+and each category has a defined {\em parent} category. This is used for
+speciation and time disaggregation. In case the speciation or the time
+profile is not found for a given source category, FUME searches for the
+profile of a parent category. This is recursive, thus the final used
+profile can be several levels above the given category. If no speciation
+or time profile is found for any parent the sources of this category
+will not be on output (the reporting option CHECK can be turned on to give warnings about such situations, see section \ref{reporting}). Example:
+\begin{verbatim}
+cat_id,name,parent
+0,default category,
+1000000,COMBUSTION IN ENERGY AND TRANSFORMATION INDUSTRIES,0
+2000000,NON-INDUSTRIAL COMBUSTION PLANTS,0
+2010000,Commercial and institutional plants,2000000
+2020000,Residential plants,2000000
+2020200,Combustion plants <50MW,2020000
+2020201,Gas,2020200
+2020202,Oil,2020200
+2020203,Coal,2020200
+2020204,Wood,2020200
+\end{verbatim}
+The hierarchical structure is completely up to user preferences. The example case shows the structure where the parent category has a lower number than the child category, which is easier for the user to understand but is not required by FUME. The categories will usually follow some structure like GNFR codes, but again it is not necessary and it is completely up to the user to design the category tree.
+
+\paragraph{model\_list.csv}
+is a list of used chemical models. The file has two columns: {\em model},
+and {\em version}. This is a user-defined model name. Any model name
+appearing in other input files/config must be listed here. Example:
+\begin{verbatim}
+name,version
+CAMx,v_6.10
+CMAQ,v_4.0
+\end{verbatim}
+
+\paragraph{activity\_units.csv}
+is a list of input activity units. This is optional. This is an alternative to \texttt{inventory\_species.csv} in case the user wants to import activity data needed for some additional modules calculations (see sec. \ref{activity-sources}). The file has two columns: {\em name}, and {\em description}. {\em Name} defines the activity unit name, the {\em description} can be empty. Example:
+\begin{verbatim}
+name,description
+count,number of animals
+\end{verbatim}
+
+
+\subsubsection{Speciation inputs}\label{speciation-inputs}
+All chemical mechanism speciation input files are expected to be in \verb|speciations| subdirectory. Both chemical and time disaggregation profiles define values based on the source category. There is no direct support for region-specific profiles but this behavior can be simulated by defining region-specific emission categories. 
+
+\paragraph{mechanism\_list.csv} is a list of chemical mechanisms that will be used further. It has three columns but only the first one is mandatory, it is the name of the mechanism. The names are completely up to the user, the software does not have any in-built mechanism information. The second column is a description or a ``long name'' of the mechanism and can be empty. The third column distinguishes between aerosol or photochemistry mechanism, but at this moment it is not used by the processor in any way. Example:
+\begin{verbatim}
+name,description,type
+AE4,AERO4,aerosol
+AE5,AERO5,aerosol
+AE6,AERO6,aerosol
+CB05,CB05,photochemistry
+CB6,CB6,photochemistry
+CF,CAMx CF aerosol option,aerosol
+\end{verbatim}
+\paragraph{sp\_species.csv} is a 
+list of speciation species for each chemical mechanism. The file has
+two columns: {\em mechanism\_name}, {\em name}. Each speciation species used in the speciation process (gspro file) must be listed here. Example:
+\begin{verbatim}
+mechanism_name,name
+AE4,PSO4
+AE4,PNO3
+AE4,PEC
+AE4,POC
+AE4,PMFINE
+CB05,PAR
+CB05,OLE
+CB05,TOL
+\end{verbatim}
+\paragraph{gspro files} FUME supports input of speciation profiles in the same format as SMOKE, i.e. gspro files. 
+The gspro file contains species split factors for the given mechanism. It has 6 columns:
+  \begin{enumerate}
+  \def\labelenumii{\arabic{enumii}.}
+  \item column \ldots{} category for which the profile is defined
+  \item column \ldots{} inventory species (``input'' for chemical speciation)
+  \item column \ldots{} chemical mechanism species (``output'' from chemical
+    speciation process)
+  \item column \ldots{} ratio of the output species in input species. For
+    mole-based speciation (typically used for gases) this is the number
+    of moles of output species in 1 mole of input species (mole split
+    factor). In the case of mass-based speciation (typically used for
+    aerosol) this is simply the mass ratio of output to input.
+  \item column \ldots{} average molar weight of species in profile for
+    gases, 1 for aerosols
+  \item
+    column \ldots{} not used in FUME at the moment
+  \end{enumerate}
+  The output species is calculated as: mass of input species * column 4 /
+  column 5. In the case of gases resulting value is in moles, for
+  aerosols in grams.
+
+\paragraph{Where to get chemical speciation files?} In
+case the user already has gspro files, they can be used directly for FUME
+input. In case the user needs to create custom speciation inputs, the
+process is different for aerosols and gases. Aerosols are typically
+mass-based split and thus the gspro input is rather straightforward.
+The user needs to obtain information about the aerosol composition of
+sources of interest somewhere - e.g. CAMS emission database is supplemented with basic aerosol composition. Considering the user wants to
+define 20 \% OC in PM\_25 for category 100 the corresponding line in
+gspro file would be\\
+\verb|100,PM_25,OC,0.2,1,<any number>|
+
+For gases, as mole-based speciated species, the situation is more
+complicated. The typical situation is that inventory contains VOC (or
+equivalent like NMVOC or TOG) which need to be split to model
+species like ALK, ALD, etc. depending on the model chemical mechanism. To
+do this the user needs to know the chemical compound composition for different
+categories (e.g. authors employed the information in Passant (2002):
+Speciation of UK emissions of non-methane volatile organic compounds).
+Then the assignment of compounds to model chemical mechanisms needs to
+be given. GSPRO files can be then generated by EPA's software Speciation Tool (available at \url{www.cmascenter.org}).
+
+It is up to the user to ensure that there is no duplicity in speciation, i.e. for each category, there is only one occurrence of a species in column 3. If not, this will cause an error. On the other hand, if there is an inventory species with no chemical species assigned, it will not be processed and will not appear in the final output. There is a check for this (see reporting section \ref{reporting}). 
+
+Each chemical mechanism must have its own gspro file. E.g. in case the user wants to import speciation files for two mechanisms AE4 and CB05, two files \verb|gspro_AE4.csv| and \verb|gspro_CB05.csv| must be provided. Contrary to SMOKE gsro files there is one difference - the name of the mechanism is given on the first line:
+\begin{verbatim}
+# GSPRO file for CB05 mechanism
+#
+CB05
+# main pollutants – mapping to themselves
+0,SO2,SO2,1,64.064,1
+0,NO,NO,1,30.006,1
+0,NO2,NO2,1,46.006,1
+0,CO,CO,1,28.01,1
+0,BZN,BENZENE,1,78.11,1
+# non-methane VOC profiles
+1000000,NMVOC,PAR,0.32009142637,35.6077499,0.1308084
+1000000,NMVOC,OLE,0.01858725399,35.6077499,0.0146438
+\end{verbatim}
+The list of gspro files to be imported is given in the main conf file in the corresponding section (an arbitrary number of gspro files can be imported):
+\begin{verbatim}
+[input_params]
+[[speciation_params]]
+gspro_files = gspro_CB05.csv, gspro_AE4.csv, gspro_CF.csv
+\end{verbatim}
+The choice of the mechanism to be used in the particular case calculation is given by the \verb|run| parameter in the main conf file:
+\begin{verbatim}
+[run_params]
+[[speciation_params]]
+chem_mechanisms = CB05, AE4        
+\end{verbatim}
+
+\paragraph{model\_specie\_names.csv} is a 
+list of model species (known for model, version, mechanism). The file
+has five columns: model, version, mechanism, name, description. This
+species will be on output for the defined model/version/mechanism.
+\begin{verbatim}
+model,version,mechanism,name,description
+CAMx,v_6.10,CF,PSO4,Sulfate
+CAMx,v_6.10,CF,PNO3,Particulate Nitrate
+CAMx,v_6.10,CB6,ACET,Acetone
+CAMx,v_6.10,CB6,ALD2,Acetaldehyde
+CAMx,v_6.10,CB6,SO2,Sulfur dioxide
+\end{verbatim}
+
+\paragraph{sp\_mod\_specie\_mapping.csv} - maps chemical speciation species to model
+  species. This is optional input. It is often the case that chemical species names are the same as model species thus this file is not needed at all. On the other hand, this gives the user an opportunity to ``tune/change'' the species after the speciation process but before the final model output. For the model/version/mechanism/species combination, a user defines model output species and conversion factors. Example:
+\begin{verbatim} 
+model,version,mechanism,spec_sp_name,spec_mod_name,map_fact
+CAMx,v_6.10,CB05,BENZENE,BENZ,1
+CAMx,v_6.10,CB05,TOL,TOL,1
+CAMx,v_6.10,CB05,XYL,XYL,1
+CAMx,v_6.10,CB05,ISOP,ISOP,1
+CAMx,v_6.10,CB05,TERP,TERP,1
+CAMx,v_6.10,CF,TOL,TOLA,1
+CAMx,v_6.10,CF,XYL,XYLA,1
+CAMx,v_6.10,CF,ISOP,ISP,1
+CAMx,v_6.10,CF,TERP,TRP,1
+\end{verbatim}
+The above example changes the name BENZENE to BENZ and doubles TOL, XYL, ISOP, and TERP VOC species as precursors of aerosols in CF mechanism. 
+
+\subsubsection{Temporal variation inputs}\label{temporal-variation-inputs}
+
+Time disaggregation can be defined as multiplicative factors for hours, days in the week,
+and months. This factor is defined as a variation from the average value for each
+time period. The second possibility to define time variation is to give
+explicit hourly factors (time series) for the period of interest. Both
+possibilities can be combined together.
+
+The subdirectory \verb|time_var| contains all the time variation inputs. The files \verb|tv_def.csv|, \verb|tv_mapping.csv| and \verb|tv_values.csv| are mandatory, the file \verb|tv_series.csv| is optional.
+
+\paragraph{tv\_def.csv} defines existing time profiles. This is a simple list of profiles defined in the following files. It has three columns: user-defined time profile id, name, and resolution. Resolution can be 1, 2 or 3 and assigns the given factors to be hourly, daily or monthly respectively. Example:
+\begin{verbatim} 
+"tv_id","name","resolution"
+100,"GNFR A - month",3
+110,"GNFR A - day",2
+111,"GNFR A - hour ",1
+200,"GNFR B - month",3
+210,"GNFR B - day",2
+211,"GNFR B - hour ",1
+\end{verbatim}
+
+\paragraph{tv\_mapping.csv} This file maps (assigns) the time profiles to the emission sources by means of emission categories. It has two columns: {\em cat\_id} (category id) and {\em tv\_id} (time profile id). More than one category can be assigned to one {\em tv\_id}. Example:
+\begin{verbatim} 
+cat_id,tv_id
+1000000,100
+2000000,200
+1000000,110
+2000000,210
+1000000,111
+2000000,211
+\end{verbatim}
+Category hierarchy is working for time profiles i.e. in case a category does not have any time profile assigned, the profile for the parent category (recursively) is used. If there is a category for which there is still no time profile, no sources of that category will be in the final output. There is a check for this (see reporting section \ref{reporting}). 
+
+\paragraph{tv\_values.csv} This file contains actual time factors. These are assumed to be multiplicative factors giving the deviation from the average value. If the user assigns all factors to be one, it means that emissions will be equally distributed for each computational step. It has three columns: {\em tv\_id}, {\em period}, and {\em tv\_factor} (temporal factor). Period denotes the month, weekday or hour depending on the resolution given in the tv definition file. Month period is from 1 to 12, weekday is from 1 (Mon) to 7 (Sun) and hour is from 0 to 23. The sum of tv factors should be 12, 7 and 24 for month, weekday and hour resolution respectively. The check if this is true is performed by CHECK reporting option (see reporting section \ref{reporting}). Example :
+\begin{verbatim} 
+tv_id,period,tv_factor
+100,1,1.2
+100,2,1.15
+100,3,1.05
+100,4,1
+100,5,0.9
+100,6,0.85
+100,7,0.8
+100,8,0.875
+100,9,0.95
+100,10,1
+100,11,1.075
+100,12,1.15
+\end{verbatim}
+
+\paragraph{tv\_series.csv} There is an optional possibility to give time factors as time series. The file has three columns: {\em cat\_id} (category id), {\em time\_loc} (date + time) and {\em tv\_factor} (corresponding time factor).
+\begin{verbatim} 
+cat_id,time_loc,tv_factor
+2020201,2015-01-01 05:00:00,2
+2020201,2015-01-01 06:00:00,2
+\end{verbatim}
+The time series has higher priority than periodic factors, i.e. when both are defined for category/timestep combination, the time series factor is used. Contrary to the previous case the category hierarchy is not working for time series.
+ 
+\subsection{Emission sources import}\label{emiss-sources}
+This section describes the configuration of the emission sources data. 
+The directory where input data for emission sources are stored is defined by
+the configuration parameter \verb|sources| (default is set same as \verb|path|
+parameter). 
+
+\subsubsection{Inventory inputs list}\label{inventory-inputs-list}
+The main configuration file responsible for processing of inventories
+(raw sources) is the text file typically located
+in the \verb|FUME_CASE| directory (full path including file name may be
+changed, it is specified in the main config in the
+\verb|input_params/emission_inventories| option). In this file, the location of
+the raw data and metadata is specified together with optional
+information on filtering the raw data, and optional scenario/vertical distribution application.
+
+This file is a tab-separated text file with a header line. It has up to 8 columns -
+inventory name, inventory version, short name for the imported file, file
+name to be imported (it is expected to be in the \verb|sources| directory), and an
+infofile expected in the same place. Those are mandatory. Then there are four optional columns, which define the emission set name, filter for imported data, scenario name, and vertical distribution. Lines beginning by \# are ignored.
+
+An example of the inventory input file:
+\begin{verbatim} 
+inventory_name	file_name	file_path	file_info_path	set_name (opt.)	filter (opt.) 
+scen_name (opt.) vert_dist (opt.)        
+INV1  point emiss/point_src.shp  emiss/point_sources.info
+      grid  emiss/geom/grid.shp  emiss/geom/grid.info
+INV1  heat  emiss/loc_heat.csv   emiss/local_heating.info  heat1  reg=1  scen1
+INV1  heat  emiss/loc_heat.csv   emiss/local_heating.info  heat2  reg=2
+\end{verbatim}
+
+The above file configures reading from inventory called INV1. On the first line, there is a configuration for \verb|point_src.shp| to be read using metadata from \verb|point_sources.info| file. The name of the file in the database is set to be \verb|point|. The next line imports a geometry set from \verb|grid.shp|. In case the inventory name column is empty, the file is treated as geometry information, with no emission input. This is stored for later use and can serve as spatial information for another emission set. The next two lines define the import of file \verb|loc_heat.csv| with metadata info file. In this case, the user decided to use a filter option so that different data can be treated separately. Two emission sets are created from the same file. The first set called heat1 uses filter \verb|reg=1|, so that only values equal to one from column reg will be imported. Moreover, the scen1 emission scenario is applied to this set.
+
+In order to minimize the efforts needed for incorporating of
 user-contributed or in-house inventories of the users, the system
 enables different formats of inventories, different projections of each
-source etc.
+source, etc. Thus it is necessary to provide metadata information (info files) so that the different sources can be processed and unified to the inner FUME format. 
+The corresponding info files to the above example are: \verb|point_sources.info|
+\begin{verbatim} 
+# input file format
+file_type = shp
+# source type
+src_type = P
 
-The main configuration file responsible for processing of inventories
-(raw sources) is the file \emph{inventory\_input.txt} typically located
-in the FUME\_CASE directory (full path including file name may be
-changed, it is specified in the main config in the
-input\_params/emission\_inventories option). In this file, location of
-the raw data and metadata is specified together with optional
-information on grouping/filtering the raw data.
+# this part configures how species and categories are given in the input file
+specie_input_type = column
+category_input_type = row
+category_name = GNFR
 
-Any row of the \emph{inventory\_input.txt} file has the following
-columns: 
+# point source params
+height = stk_hght, meter
+diameter = stk_diam, m
+temperature = stk_temp, K
+velocity = skt_vel, m/s
+\end{verbatim} 
+This defines the file type to be shapefile (possibilities are text, shp, netcdf), the source type is point sources. Then specified is the layout of the input file so that different species are in different columns and category information is defined for each source (row) in the column named GNFR. Further, it contains information on stack parameters. In case those stack parameters are not provided, they are automatically filled in by FUME based on GNFR categories. Keep in mind that this parameter filling is hard-coded and assumes GNFR categories in 6-digit format (see function \verb|fill_missing_point_parameters| in \verb|$FUME_ROOT/client/case/dispatch.py|) thus in case the user has different categorization this parameter filling will not work properly and stack parameters, if required, need to be provided by the user (or filling function changed appropriately).
+
+Some rows in the inventory list file may have an empty name of inventory which indicates a {\em geometry set}. In this way sharing of geometry among different sources is easily treated. This is the example of \verb|grid.info|:
 \begin{verbatim}
-``inventory\_name'' ``file\_name'' ``file\_path'' ``file\_info\_path''
-``set\_name (opt.)'' ``filter (opt.)'' ``filter (opt.)'' ``scenario (opt.)''   
-\end{verbatim}
-
-
-Thus a sample row from TNO inventory looks like this:
-\begin{verbatim}
-``TNO_III'' ``TNO_MACC_III_v1_1_2011'' ``TNO/TNO_MACC_III_emissions_v1_1_2011_ID.txt'' ``TNO/TNO_MACC_III_emissions_v1_1_2011_ID.info''
-``TNO_MACC_III_v1_1_2011_P'' ``SourceType=P''
-\end{verbatim}
-
-The file\_info\_path indicates the location of user-provided metadata
-\emph{*.info}, where the information on format, source type and geometry
-is stored. Below we see a sample info file:
-
-\begin{verbatim}
-\# type of file 
-file_type = text 
-field_delimiter = `,' 
-text_delimiter = `"' 
-encoding = `utf8'
-
-\# number of lines before header to be skipped 
-skip_lines = 0
-
-\# source type 
+file_type = 'shp'
 src_type = A
-category_def = 6 
-source_id = ZUJ,
+geom_name = grid
+geom_id = id
+\end{verbatim}
+which imports shapefile with area geometries with name grid and unique identifier in column id. Then this geometry information can be used in an emission file with config info \verb|local_heating.info|:
+\begin{verbatim}
+file_type = text
+field_delimiter = ';'
+text_delimiter  = '"'
+src_type = A
+specie_input_type = column
+category_input_type = predef
+category_name = 3000000
+geom_name = grid
+geom_id = id_geom
+\end{verbatim}
+This configures the input data to be a semicolon-separated text file with area sources. Species are in columns while the category is predefined to be identical for all sources in the file with value 3000000. It refers to previously imported geometry called grid and should be coupled to geometry with the key identifier in the \verb|id_geom| column.
 
-\# geometry 
-geom_name = `CZ_ZUJ'
+The full definition configuration file for sources with a brief description, default and possible values can be found in \verb|$FUME_ROOT/client/conf/configspec-sources.conf|.
+
+\subsubsection{Inventory specific inputs}
+The logic in the emission files structure is that they are usually grouped in emission inventories. An emission inventory typically has the same data provider, and thus has common naming conventions for species and categories. The user has to provide the category and species mapping files, but this is provided for the whole inventory not for each file separately. In the example above, there is only one inventory called INV1. Any time the processor finds an inventory name that is not already imported it looks for the two mapping files in the same location as defined in the main config file for emission sources. The names of the files are \verb|category_<inventory_name>.csv| and \verb|species_<inventory_name>.csv|. In the above example the \verb|category_INV1.csv| example contains:
+\begin{verbatim}
+orig_id,cat_id
+A,1000000
+B,2000000
+C,3000000
+D,4000000
+E,5000000
+F,6000000
+G,7000000
+H,8000000
+3000000,3000000
+heat_wood,3100000
+heat_gas,3200000
+\end{verbatim}
+The file has two comma-separated columns that map the names of the categories in the input emission files to the inner unified categories as defined in the \verb|emission_categories.csv|. The column {\em orig\_id} states the original name in the inventory and maps it through column {\em cat\_id} to the inner FUME category. Every value in the {\em cat\_id} column must be present in the \verb|emission_categories.csv| file, otherwise, an error will be reported.
+
+Similarly, an example of \verb|species_INV1.csv| may be:
+\begin{verbatim}
+inv_specie_name,ep_specie_name,inv_unit
+PM10,PM10,t/year
+PM25,PM2_5,t/year
+BENZ,BZN,kg/year
+SO2,SO2,t/year
+NOx,NOX,t/year
+\end{verbatim}
+This maps species names to unified inner FUME names defined in \verb|inventory_species.csv|. The third column defines the unit of the input species. For recognized units see the documentation of the {\em pint} library. The units are internally unified to g/s.
+
+The software has an opportunity to add/calculate additional species that are not included in original emission files but can be expressed as a linear combination of other species. This is defined in the \verb|calculate_polutants.csv| file. In this file, for each category, the user can define an arbitrary number of those expressions (comma-separated). Example:
+\begin{verbatim}
+"category","expression"
+0,"PM_CPRM=PM10-PM2_5"
+6000000,"NO2=0.05*NOX, NO=0.652*NOX-0.652*NO2, PM_CPRM=PM10-PM2_5"
 \end{verbatim}
 
-Valid values for source type and geometry are stored in the file
-\emph{configspec-sources.conf}. Thus, for example, valid values for type
-are A(area sources), P(point sources) and L(line sources).
+\subsection{Activity sources import}\label{activity-sources}
+FUME also enables the import of activity sources, i.e. sources with information on some kind of activity e.g. the number of livestock, which can be used to calculate emissions in some additional external module. At this moment FUME has no module of this kind and in case the user wants to use this option it is needed to write such a module to further process the activity data. 
 
-For technical reasons it is handy to include the description of geometry
-files at the beginning of the file \emph{inventory\_input.txt}. These
-rows have empty name of inventory. In this way sharing of geometry among
-different sources is easily treated.
-
-main config file : output files and other paths. The paths must be
-created in advance.
-
-
-\section{The workflow}\label{the-workflow}
-
-In the configuration file fume\_workflow.conf the user may specify the
-actual workflow of the simulation. It is possible to comment out some
-steps of the simulation which are thus skipped by the processor. This
-enables the user to tune single steps without having to go through all
-the processes every time. In this case the switch scratch in the main
-config file is to be set on False.
-
-The only step which cannot be skipped (if any row after that line is
-switched on) is case.prepare\_conf.
+The import of the data is similar to emission sources. The activity import list is defined in the main config file in the \verb|input_params| section by the parameter \verb|activity_data_inventories| (equivalent to \verb|emission_inventories|). The activity inventory list file has the same structure as the emission inventory list file. The activity character of the data has to be denoted in the source configuration file through parameter \verb|data_type|. This is set by default to 'E' - emissions. Other possibilities are 'C' - count, e.g. number of cars, and 'D' - density, e.g. density of roads. An equivalent of \verb|species_<inventory_name>.csv| is the file \verb|activity_units_<inventory_name>.csv|. The known activity quantities have to be defined in the file \verb|activity_units.csv| similarly as in \verb|inventory_species.csv|.
+Both types of import can be combined.
 
 \section{Transformations}\label{transformations}
+The key part of the emission processing workflow is the transformation of the imported emission sources to the model grid. It is possible to process all emissions as they are all in all. Alternatively, the user has the option to define the transformation process for different emission sets independently through the so-called transformation chains. It is possible to define a filter that limits the emission sources based on inventory or a predefined emission set. Further, the sources can be masked based on a predefined polygon(s) to include only sources in/outside of the polygon. It is also possible to apply scenarios on the transformation chains. 
 
-these do not change values, e.g. of emissions. Any transformation may be
-restricted to a inventory, set or category.
-
-The transformation configuration file , (e.g. fume\_transformations.conf
-(name specified in the main configuration file in the section
-transformation, parameter source mozna zmenit na definitions)) specifies
-or defines (running later in chains) transformation ``objects''.
-
-valid types of tranformations:
-
-\begin{itemize}
-\item
-  intersect
-\item
-  mask (here the masking condition is phrased as a SQL condition??)
-\item
-  source\_filter : filtering according to source parameters - category
-  of source, \ldots{} anything which is in table of sources (doplnit)
-\item
-  geometrical transformations (change of domain, projection, regridding)
-\end{itemize}
-
-Transformations are general but they may be confined to inventory or
-set.
-
-A built-in transformation to\_grid performs the intersect with the grid
-ep\_grid\_tz (fixed name of the database table, this grid is the target
-grid of the user)
+The definitions (syntax) of any valid transformation are in the file\\
+\verb|$FUME_ROOT/config/transformations/configspec-transformations.conf|. Using these
+definitions, the users may create their own files e.g.
+\verb|fume_transformations.conf| where user-defined transformations are
+defined. These may then appear in transformation chains (see below).
+The name of the transformations definition file is in the section \verb|[transformations]| in the main config file in parameter 
+\verb|ep_transformations.conf|.
 
 The syntax of any section in the transformation configuration file is
-derived from the definition file configspec-transformations.conf (the
-first row involves the name of the transformation which serves as
+derived from the definition file \verb|configspec-transformations.conf| (the first row involves the name of the transformation which serves as
 reference in the chain specification (see below) in the main config
-file):
-
+file). Example:
 \begin{verbatim}
- [[name_of_transformation]]
- type = type_of_transformation 
- intersect = name_of_the_shapefile #(must be imported among geometries) 
- mask\_type = inside
- ...
-\end{verbatim}
+ [[inside_CZ]]
+ type = mask 
+ mask_type = inside 
+ mask_file = CZ_regions
+ mask='"NUTS_ID"='CZ02' AND "STAT_LEVEL"=2'
 
-As in other files, the defaults are listed in the definition file
-configspec-transformations.conf, too.
+ [[eu]]
+ type=source_filter
+ set=EU
+\end{verbatim}
+This example defines the mask-type transformation. The parameter type has always to be present. Other parameters depend on the transformation type. This further defines the chosen emissions to be inside (another possibility is outside) the polygon(s) from \verb|mask_file| geometry file (has to be imported beforehand). Mask condition is phrased as SQL condition (this chooses the relevant polygons from the file). The second transformation chooses only the emission set called EU.
+
+Valid types of base built-in transformations:
+\begin{itemize}
+\item \verb|source_filter|: filters sources according to source type and properties.
+\item \verb|area_multiplicator|: multiplies the emission by the area of a geometry object
+\item \verb|limit_to_grid|: limits the emission sources to sources intersecting with the grid envelope, it can also transform geometries to output SRID (useful for performance enhancement)
+\item \verb|srid_transform|: transforms sources from one SRID to another
+\item \verb|mask|: limits the emission sources to sources intersecting with the grid envelope, it can also transform geometries to output SRID
+\item \verb|intersect|: intersects input shapes with the assigned geometry sets and calculates the intersect coefficients.
+\item \verb|surrogate|: applies surrogates from the assigned set of the surrogate geometry shapes. (see chapter \ref{surrogates})
+\end{itemize}
+
+Valid types of special built-in transformations:
+\begin{itemize}
+\item \verb|to_grid|: transforms input shapes into the output grid.
+    It is a mandatory transformation and has to be present in every chain. It is usually placed as the last step in the transformation chain. If the chain does not contain the \verb|to_grid| transformation or transformation derived from it, this transformation is automatically added to the end of the chain.
+\item \verb|scenarios|: saves a mapping between transformation chains and scenarios (see chapter \ref{scenario})
+\item \verb|level_filter|: saves a mapping between transformation chains and vertical levels
+\end{itemize}
+
+Additional named transformations can be defined based on these built-in transformations in the \verb|transformations.conf| file.
 
 \textbf{Running transformations:}
+In the main configuration file the so-called ``chains'' are defined.
+Individual chains are independent of each other, i.e. they may run in
+parallel and no interactions between different chains occur. In
+particular, no chain overwrites the outputs of another chain, but
+the output data are all stored in the database. 
 
-In the main configuration file the so called ``chains'' are defined.
-Single chains are intrinsically independent, i.e. they may run in
-parallell and no interactions between different chains occurs. In
-particular, any chain doesn't overwrite outputs of another chain, but
-the output data are all stored in the database. Nevertheless, every
-chain should have the to\_grid transformation at the end, otherwise the
-resulting emissions are not written into the output file.
+The simplest chain is a mere transformation to the user grid, i.e. the user wants to process emission data as is. This is defined in the section \verb|[transformations]|, subsection \verb|[[chains]]|:
+\begin{verbatim}
+[[chains]]
+all= ,
+\end{verbatim}
+The syntax is: \verb|<name of the transformation chain>| = \verb|comma-delimited transformations|. The name of the chain is arbitrary. Another example may be:
+\begin{verbatim}
+[[chains]]
+inCZ= EU, inside_CZ, scenarios:scen1
+\end{verbatim}
+This uses the above-defined transformation --- choose only the emission set called EU, then mask it to use only sources in the CZ, and finally apply the previously defined scenario.
 
-in the section {[}transformations{]}, subsection {[}{[}chains{]}{]}
+The number of the transformation chains is not limited.
+It is the responsibility of the user to make sure that no erratic
+overlapping of emission outputs will occur. For example, if one uses
+finer inventories for the domain of interest while for the background a
+coarser inventory is available, the user has to mask out the finer
+domain from the coarser inventory. So far, the system doesn't detect
+these situations nor does it produce any warnings of this kind.
 
-The simplest chain is a mere transformation to user grid. In our case,
-this is the {[}{[} to\_grid {]}{]} built-in transformation. This is
-written as e.g. chain1 = to\_grid
+\subsection{Surrogate type transformation}\label{surrogates}
+The surrogate type of transformation enables to distribute the emissions according to other spatial information. For example, the user has information on total national aviation emissions together with the shapefile of airports. In this case, it is possible to do this spatial assignment using FUME. It is needed to import both emission information and surrogate spatial information as geometry sets. The definition of transformation can be like:
+\begin{verbatim}
+[[aviation_surrogate]]
+type=surrogate
+surrogate_set=airports
+surrogate_type=limit
+\end{verbatim}
+This transformation can be then applied to the emission set. In this case, the emissions will be limited to the polygons defined in the airports set based on the area of the corresponding polygon. The area weighting is always applied. Moreover, there is a possibility to add weighting by another factor. In the airport example, it can be information about the yearly number of take-offs. In this case, this can be added in the source configuration file as \verb|weight| parameter.
 
-\section{Time disaggregation and speciation}\label{time-disaggregation-and-speciation}
+Other examples of the application of surrogates are:
+\begin{itemize}
+    \item transformation of the heating emissions provided by city parts to individual buildings
+    \item transformation of the transport emissions provided for the larger areas to individual streets
+    \item transformation of the transport emissions provided for individual streets as line sources to the area of the transport flow
+\end{itemize}
 
-These follow the processing of sources and all spatial transformations.
+There are two surrogate types: limit and spread. As described above, the limit type limits the emissions from larger areas to smaller sub-areas (the first three examples). On the opposite, the spread type extends the emissions from ``smaller'' to ``larger'' areas, e.g. from roads defined as lines to polygon-defined roads (the third example).
+
+At this moment the surrogate set can be only a polygon while the geometry of the input emission can be of all types (point, line or polygon).
+
+\section{Speciation and time dissagregation}
+After the geometrical processing of the sources, the chemical speciation coefficients for each category are calculated and applied. Afterward, the multiplicative factors for the temporal disaggregation are pre-calculated. The time disaggregation of emissions itself (i.e. the time series calculation) is not applied in this step but rather at the final step --- the output to final format due to performance optimization reasons. Thus, by default, emission time series are not stored in the database. Still, it is possible to allow this by user configuration e.g. for later data verification or for further processing using other software (e.g. GIS).
 
 \section{Vertical distribution of emissions}\label{sec:vdist}
 
-Along with the emissions inventories often the information how these emissions, 
-depending on the activity, are distributed in vertical. FUME implements thus the possibility
-to distribute the source emissions to different (user-defined) layers using category-specific
- vertical distribution (vdist) factors. Similar to scenarios, user can define several vertical distributions. These can be applied on chosen emission set (eset). More vertical distributions on each emission set are possible.
+Along with the emissions inventories often the information on how these emissions, depending on the activity, are distributed vertically. FUME thus implements the option to distribute the source emissions to different (user-defined) layers. Two different mechanisms of this distribution are implemented in FUME.
 
-The information whether a vdist is to be applied on a eset, is to be set on the optional 8th column in the the emission inventory list file (the 7th columns is the scenario columns, also optional, see \ref{sec::scen}).
+\subsection{Category-specific vertical distribution factors}
+The first method performs vertical distribution using category-specific
+vertical distribution (vdist) factors. Similar to scenarios, the user can define several vertical distributions. These can be applied to the chosen emission set (eset). More vertical distributions on each emission set are possible.
 
-In the following example, the vdist "vd1" is applied to the eset R1-area:
+The information on whether a vdist is to be applied on an eset, is configured by setting the optional 8th column in the emission inventory list file (the 7th column is the scenario column, also optional, see section \ref{scenario}).
 
+In the following example, the vdist \verb|vd1| is applied to the eset \verb|R1-area|:
 \begin{verbatim}
 inv_name   file_name  file_path      file_info_path  set_name  filter  scenario	vdist
 R1         R1-area    area_emis.csv  area_emis.info  R1-area           sc1	vd1
 \end{verbatim}
 
-Additionaly, user needs to provide vdist listing file. This file is a simple list of the defined vertical distributions. Its name and location is defined by user in the main config file by parameter \verb|vertical_distribution_list| in \verb|input_params| section. It contains two columns --- a name of the vertical distribution and a name of the file with its definition. Example of a vdist list file:
+Additionally, the user needs to provide a vdist listing file. This file is a simple list of the defined vertical distributions. Its name and location are defined by the user in the main config file by the parameter \verb|vertical_distribution_list| in \verb|input_params| section. It contains two columns --- a name of the vertical distribution and a name of the file with its definition. Example of a vdist list file:
 \begin{verbatim}
 name, file
 vd1, vdist1.csv
 vd2, vdist2.csv
 \end{verbatim}
 
-The columns need to have this order and the header line must be present. The vdist definition files are assumed to be in the same directory as vdist list file. Each vdist definition file contains four columns. Example of a vdist definition file (e.g. vdist1.csv):
+The columns need to have this order and the header line must be present. The vdist definition files are assumed to be in the same directory as the vdist list file. Each vdist definition file contains four columns. Example of a vdist definition file (e.g. \verb|vdist1.csv|):
 
 \begin{verbatim}
 cat_id,level,height,factor
@@ -669,46 +991,50 @@ cat_id,level,height,factor
 3000000,1,100,0.1
 \end{verbatim}
 
-The columns must appear in this order. The first indicates the category for which the vdist factor to be applied, the 2nd columns tell to which output layer with the 3rd column indicating the layer interface height in meters (layer top). Layers are indexed from zero and the 0th layer is adjacent to the surface (30 meters thick in this example). The last columns is the multiplicative factor to be applied on emissions. To avoid loosing emissions, the factors for a particular category must sum up to one.
+The columns must appear in this order. The first one indicates the category for which the vdist factor is to be applied, the 2nd column tells to which output layer with the 3rd column indicating the layer interface height in meters (layer top). Layers are indexed from zero and the 0 layer is adjacent to the surface (30 meters thick in this example). The last column is the multiplicative factor to be applied to emissions. To avoid losing emissions, the factors for a particular category must sum up to one.
 
-The switch called \verb|apply_vdistribution| under the  \verb|vdistribution_params| subsection of the \verb|run_params| section is used to control whether to apply vertical distributions. If it is set to "no", vertical distributions are not applied regardless of any definition at an eset line in the emissions inventory list file. The default value is "no". However, FUME behaves consistently here and if it is "yes" and no vdist is defined for any eset, the resulting emissions will be still correctly calculated (and will be surface emissions only).
+The switch called \verb|apply_vdistribution| under the  \verb|vdistribution_params| subsection of the \verb|run_params| section is used to control whether to apply vertical distributions. If it is set to ``no'', vertical distributions are not applied regardless of any definition at an eset line in the emissions inventory list file. The default value is ``no''. However, FUME behaves consistently here and if it is ``yes'' and no vdist is defined for any eset, the resulting emissions will be still correctly calculated (and will be surface emissions only).
 
-The vertical distribution heights can be different for different inventories, so FUME implements a the step called \verb|case.process_vertical_distributions| in the FUME workflow file, which recalculates the inventory specific vdist factors to all ancestral emissions categories and to the user defined output layers. If this step in the workflow file is omitted, FUME will not apply any vdist factors. The indicated step in the workflow should be called just after the transformations.
+The vertical distribution heights can be different for different inventories, so FUME implements the step called \verb|case.process_vertical_distributions| in the FUME workflow file, which recalculates the inventory-specific vdist factors to all ancestral emissions categories and to the user-defined output layers. If this step in the workflow file is omitted, FUME will not apply any vdist factors. The indicated step in the workflow should be called just after the transformations.
 
-The application of vdist factors take place in the output module (see \ref{output}) when retrieving speciated category specific not yet time-dissaggregated emission totals (e.g. to write as a netcdf file). 
+The application of vdist factors takes place in the output module (see section~\ref{output}) when retrieving speciated category-specific not yet time-disaggregated emission totals (e.g. to write as a NetCDF file). 
 
+\subsection{Vertical distribution according to the surface level}
+Another method was developed mainly for the purpose of placing emissions on the surfaces lying on top of each other. This situation occurs mainly in the case of fully 3D microscale simulations e.g. in the model PALM. An example of such emission can be e.g. street transport emission on a bridge over the river with the water transport emission. Another example can be a multilevel crossroad.
+
+This type of vertical distribution is defined in the transformation chain by applying the \verb|level_filter transformation|, e.g. \verb|level_filter:1| sets the chain surface level to 1. The levels of the upward-facing surfaces are numbered from top to bottom, level zero represents the top surface, level one the second surface from the top, etc. In our previous example, the bridge emission would have level=0 and the water emission level=1. These levels are consequently used in the FUME postprocessing module for the CTM model to place emission into the proper vertical grid level according to the model 3D structure of the surfaces. This processing is currently implemented in the PALM postprocessing module.
 
 \section{Scenarios}\label{scenario}
-FUME enables a possibility to apply emission scenarios. This is implemented as a simple factor and operation, which is applied based on predefined specie(s), category(ies) and attribute filter.  User can define several scenarios. These can be applied on chosen emission set (eset). More scenarios on each emission set are possible. There are two ways of applying the scenario(s): immediately on source import and/or during the transformation chains. In case of scenarios on import, the emission set is stored with the scenario applied already. This is defined in the emission inventory list file (\verb|emission_inventories|) in 7th optional column, where desired scenario names are given (comma separated). Here is an example, where scenario sc1 will be applied on emission set R1-area:
+FUME enables the option to apply emission scenarios. This is implemented as a simple factor and operation, which is applied based on predefined species, category(ies) and attribute filters.  Users can define several scenarios. These can be applied to chosen emission sets (eset). More scenarios on each emission set are possible. There are two ways of applying the scenario(s): immediately on source import and/or during the transformation chains. In the case of scenarios on import, the emission set is stored with the scenario applied already. This is defined in the emission inventory list file (\verb|emission_inventories|) in the 7th optional column, where desired scenario names are given (comma separated). Here is an example, where scenario sc1 will be applied to emission set R1-area:
 \begin{verbatim}
 inv_name   file_name  file_path      file_info_path  set_name  filter  scenario
 R1         R1-area    area_emis.csv  area_emis.info  R1-area           sc1
 \end{verbatim}
 
-Additionaly, user needs to provide scenario definition files. One file is a simple list of the defined scenarios. Its name and location is defined by user in the main config file by parameter \verb|scenarios_list| in \verb|input_params| section. It contains two columns --- a name of the scenario and a name of the file with its definition. Example of scenario list file:
+Additionally, the user needs to provide scenario definition files. One file is a simple list of the defined scenarios. Its name and location are defined by the user in the main config file by the parameter \verb|scenarios_list| in \verb|input_params| section. It contains two columns --- the name of the scenario and the name of the file with its definition. Example of scenario list file:
 \begin{verbatim}
 name, file
 sc1, scenario1.csv
 sc2, scenario2.csv
 \end{verbatim}
-The columns need to have this order and the header line must be present. The scenario definition files are assumed to be in the same directory as scenario list file. Each scenario definition file contains minimum one and maximum five columns. Example of scenario definition file (e.g. scenario1.csv):
+The columns need to have this order and the header line must be present. The scenario definition files are assumed to be in the same directory as the scenario list file. Each scenario definition file contains a minimum of one and a maximum of five columns. Example of scenario definition file (e.g. scenario1.csv):
 \begin{verbatim}
 category, species, filter             , value, operation
 2020204,  NMVOC,                      , 0.8  , *
        ,  SO2,     REGION_NAME=Region2, 5    , +
 \end{verbatim}
-The columns can be in arbitrary order, but the header line with exact column names must be present. Whole columns, excepting value, can be ommited, which is the same as empty value. In case of operation column, the default value is multiplication. The above example defines scenario which will multiply emissions of NMVOC for all sources with category 2020204 by 0.8. Additionaly, it will add 5 to emissions of SO2 for all categories, but only for sources in compliance with attribute filter criteria that their REGION\_NAME is Region2. Keep in mind that scenario factors are applied after inner unit conversion. Thus the emission unit is g/s. As attribute filter criteria can be used any column from original raw emission inputs. The category hierarchy is working for scenario values. This means that for each category/specie combination the value is filled for all child categories unless they have its own definition. The simplest scenario definition is as follows
+The columns can be in arbitrary order, but the header line with exact column names must be present. Whole columns, excepting value, can be omitted, which is the same as empty value. In the case of the operation column, the default value is multiplication. The above example defines a scenario that will multiply emissions of NMVOC for all sources with category 2020204 by 0.8. Additionally, it will add 5 to emissions of SO2 for all categories, but only for sources in compliance with attribute filter criteria that their REGION\_NAME is Region2. Keep in mind that scenario factors are applied after inner unit conversion. Thus the emission unit is g/s. As attribute filter criteria, any column from the original raw emission inputs may be used. The category hierarchy is working for scenario values. This means that for each category/species combination, the value is filled for all child categories unless they have their own definition. The simplest scenario definition is as follows
 \begin{verbatim}
 value
 2
 \end{verbatim}
-and means that all sources of all categories and all species of given eset will be doubled. The factors cannot be ``chained'' in one scenario --- thus defining more factors for one source/specie/category combination is not allowed and this definition
+and means that all sources of all categories and all species of a given eset will be doubled. The factors cannot be ``chained'' in one scenario --- thus defining more factors for one source/species/category combination is not allowed and this definition
 \begin{verbatim}
 category, species, filter             , value
 2020204,  SO2,     REGION_NAME=Region2, 0.8
        ,  SO2,                        , 5
 \end{verbatim}
-will result in an error. Although in case those two lines where in two different scenario files and then applied on one eset, both will apply.
+will result in an error. However, in case those two rows were in two different scenario files and then applied on one eset, both will apply.
 
 The use of scenarios during the transformation chains is possible in two ways:
 First, global scenarios applied to all processed inventories can be run by
@@ -730,158 +1056,204 @@ tno_all=tno_all,scenarios:industry agri
 \end{verbatim}
 
 specifies that the scenarios \verb|industry| and \verb|agri| will be applied
-at the end of the \verb|tno_all| chain. Scenarios during transformations are somewhat limited --- the attribute filter is ignored (factor value is applied despite this filter) and operation is defined to be multiplication (despite the value in input file).
+at the end of the \verb|tno_all| chain. Scenarios during transformations are somewhat limited --- the attribute filter is ignored (factor value is applied despite this filter) and the operation is defined to be multiplication (despite the value in the input file).
 
 The current version imports scenario definitions together with the emission sources thus in case of changing/adding the scenario the whole source importing process has to be run. 
 
-Keep in mind that the scenarios on import applies immediately during the emission import, then the calculation pollutants processes. The scenarios during transformations occur before chemical speciations.
+Keep in mind that the scenarios on import are applied immediately during the emission import, and then the calculation of pollutants is processed. The scenarios during transformations occur before chemical speciations.
+
+
 
 \section{External models}\label{external-models}
 
 In many cases, part of the emissions has to be calculated using
-different methods than offered by the emissions preprocessor. E.g.
-biogenic emissions are routinely calculated using standalone models;
+different methods than offered by the emissions preprocessor. The
+biogenic emissions, for example, are routinely calculated using standalone models;
 another example could be the calculation of lightning emissions, emissions of windblown dust,
-emissions from domestic heating or emission from agriculture - all
+emissions from domestic heating or emissions from agriculture - all
 having in common some dependence on meteorological conditions. External
 models can be written in any programming language and are called with a
 python wrapper (interface).
 
-External models themsleves or their interfaces are placed in
+External models themselves or their interfaces are placed in
 
-client/models e.g. client/models/model1 client/models/model2
+\verb|$FUME_ROOT/client/models| e.g. \verb|$FUME_ROOT/client/models/model1|.
 
-They are defined and configured in the {[}{[}models{]}{]} section of the
-main config file {[}{[}models{]}{]} models = `model1', `model2' \# the
-comma-separated model list model\_configs = `ep\_model1.conf',
-`ep\_model2.conf' \# the comma-separated list the each model
-configuration (this is the configuration of the interface in general)
+They are defined and configured in the \verb|[[models]]| subsection of the
+\verb|[run_params]| section in the main config file, e.g.:
+\begin{verbatim}
+[run_params]
+...
+[[models]]
+models = 'model1', 'model2' # comma-separated model list
+model_configs = 'ep_model1.conf', 'ep_model2.conf' # comma-separated list of model
+configurations
+\end{verbatim}
 
 There are some general requirements to include models in the emission
-preprocessor: 1) the model interface has to hold the name
-client/models/model1/ep\_model1.py 2) within ep\_model1.py, a function
-named `run' has to be placed which calls the model itself. 3)
-optionally, if the particular model requires some preprocessing, the
-`preproc' function has to be specified in
-client/models/model1/ep\_model1.py as well 4) configuration
-specification may be provided as a configspec file, eg.
-client/models/model1/configspec-model1.conf. 
-See the "dummy" model provided along with the standard FUME code.
+preprocessor and all models have to be implemented to comply with a common interface:
+\begin{enumerate}
+\item the model code needs to be present in a submodule of FUME, e.g.:\\
+\verb|$FUME_ROOT/client/models/model1/ep_model1.py| 
+\item the model must implement a \verb|run| function which gets called for each external model in the \verb|case.run_external_models| workflow step
+\item optionally, the external model may implement a \verb|preproc| function (usually if the particular model requires some preprocessing) which gets called for each external model in the \verb|case.preproc_external_models| workflow step
+\item configuration specification may be provided as a configspec file, eg.\\
+\verb|$FUME_ROOT/client/models/model1/configspec-model1.conf|. 
+    
+\end{enumerate}
+For an example of the implementation, see the \verb|dummy| model provided along with the standard FUME code.
 
 Running the models in the workflow including the optional model
-preprocessing is done by placing the following steps:
-case.preproc\_external\_models \# for calling each model's preproc
-function case.run\_external\_models \# to call the models
+preprocessing is done by including the following steps:
+\begin{itemize}
+\item \verb|case.preproc_external_models| to call each model's preprocessing
+\item \verb|case.run_external_models| to call the models
+\end{itemize}
 
-Models are often dependent on meteorological input. In order they
-recieve the right meteorological input fields, the \_required\_met list
-has to be specified in its wrapping module client/models/model1/ep\_model1.py
+Models are often dependent on meteorological input. In order that they
+receive the right meteorological input fields, the \verb|_required_met| list
+has to be specified in its wrapping module (e.g. \verb|$FUME_ROOT/client/models/model1/ep_model1.py|)
 
-e.g. for MEGAN this is \_required\_met = {[} `soim1', `soit1', `tas',
-`ps', `qas', `wndspd10m', `pr24', `par'{]}, where the list points to the
+In the MEGAN module, this is\\ \verb|_required_met = [ 'soim1', 'soit1', 'tas', 'ps', 'qas', 'wndspd10m', 'pr24', 'par']|\\ where the list points to the
 possible internal meteorological variables.
 
-We use IPCC-abbrevations for internal meteorological variable naming 
-\itemize
-\item tas - temperature at surface {[}K{]} 
-\item ta - 3D temperature {[}K{]} 
-\item qas - specific humidity at the surface {[}kg/kg{]}
-\item qa - 3D specific humidty
-\item rsds - surface incident SW radiation {[}W/m2{]}
-\item par - photosyntetically active radiation {[}W/m2{]} 
-\item pa - 3D pressure {[}Pa{]} 
-\item zf - layer interface heights {[}m{]} 
-\item uas - U-wind anemometer height (usually 10m) {[}m/s{]} 
-\item vas - V-wind anemometer height (usually 10m) {[}m/s{]} 
-\item ua - 3D U-wind {[}m/s{]} 
-\item va - 3D V-wind {[}m/s{]} 
-\item wndspd - 3D wind speed {[}m/s{]}
-\item wndspd10m- wind speed at anemometer height (usually 10m) {[}m/s{]} 
-\item pr - precipiation flux {[}kg m-2 s-1{]} 
-\item pr24 - accumulated precipitation {[}kg m-2{]} 
-\item soim - Soil moisture {[}kg/m3{]}
-\item soit - Soil temperature {[}K{]}
+We use the CF conventions abbreviations for internal meteorological variable naming 
+\\
 
+\begin{tabular}{ll}
+{\em short name} & {\em definition}\\\hline
+tas & temperature at surface {[}K{]} \\
+ta & 3D temperature {[}K{]} \\
+qas & specific humidity at the surface {[}kg/kg{]}\\
+qa & 3D specific humidity\\
+rsds & surface incident SW radiation {[}W/m2{]}\\
+par & photosynthetically active radiation {[}W/m2{]} \\
+pa & 3D pressure {[}Pa{]} \\
+zf & layer interface heights {[}m{]} \\
+uas & U-wind anemometer height (usually 10m) {[}m/s{]} \\
+vas & V-wind anemometer height (usually 10m) {[}m/s{]} \\
+ua & 3D U-wind {[}m/s{]} \\
+va & 3D V-wind {[}m/s{]} \\
+wndspd & 3D wind speed {[}m/s{]}\\
+wndspd10m & wind speed at anemometer height (usually 10m) {[}m/s{]} \\
+pr & precipiation flux {[}kg m-2 s-1{]} \\
+pr24 & accumulated precipitation {[}kg m-2{]} \\
+soim & Soil moisture {[}kg/m3{]}\\
+soit & Soil temperature {[}K{]}\\\hline
+\end{tabular}
 
-External models may depend on "activity" data which are handled within FUME standard workflow. These can be any kind of data representing the amount of some activity or intensity of some property wich determines the strength of the emissiosn flux.
+External models may depend on ``activity'' data which are handled within FUME standard workflow. These can be any kind of data representing the amount of some activity or intensity of some property that determines the strength of the emission flux.
 
-Emission generated by external modules may or may not be combined with the internally calculated emission data.
+Emissions generated by external modules may or may not be combined with the internally calculated emission data.
+
+\subsection{The MEGAN module}
+The MEGAN module calls precompiled FORTRAN-based MEGAN binaries and calculates the biogenic emission fluxes over the ``case'' grid for the time period defined by the \verb|[[time_params]]]| section in the main FUME configuration. 
+
+The path of the MEGAN Fortran binaries is set in the MEGAN module configuration file (\verb|ep_megan.conf|):
+\begin{verbatim}
+# MEGAN binaries
+megan_emproc_exe = /path/to/megan/emproc
+megan_mgn2mech_exe = /path/to/megan/mgn2mech
+\end{verbatim}
+
+The required inputs for MEGAN include meteorological driving data, plant-functional-type (PFT) data, leaf-area-index (LAI) data, emission factors for different plants (EF), and soil-type data (SLTYP).
+
+The meteorological driving data is prepared by the MEGAN module from external meteorological files provided in the \verb|[input_params]| section (\verb|[[met]]| subsection) of the main FUME configuration file based on the 
+\verb|_required_met| variable within the module's main file (see above). The created meteorological input file is stored under \verb|megan_in_met|.
+
+The PFT, LAI and EF inputs (MEGAN-ready inputs in netcdf format) are set by:
+\begin{verbatim}
+megan_input_dir = /path/to/input_files
+megan_in_lai = LAI_in_file.nc
+megan_in_pft = PFT_in_file.nc
+megan_in_ef = EF_in_file.nc
+\end{verbatim}
+
+The SLTYP input is used to generate soil-NO emissions and is set in \verb|megan_in_sltyp|.
+
+The LAI, PFT and EF files must be prepared separately complying with the required MEGAN format specification. Alternatively, the MEGAN model within FUME offers the possibility to create these files from global/regional LAI, PFT, SLTYP, EF files, using ``cdo'' for interpolating to the user-defined grid. The path to these ``raw'' files is defined by:
+\begin{verbatim}
+megan_input_data_dir = /path/to/raw/input/files/
+megan_lai = lai_global_or_regional.nc
+megan_pft = pft_global_or_regional.nc
+megan_ef = "list of emission factor files per species"
+megan_sltyp = sltyp_global_or_regional.nc
+\end{verbatim}
+
+The MEGAN output file is stored under:
+\verb|megan_out| in the \verb|megan_out_dir| folder.
+
+The chemical mechanism to which the MEGAN emissions need to be speciated is set by \verb|megan_chem_mech|.
+
+\subsection{Additional external models}
+Additionally, FUME contains two further external models for emissions from heating and emissions of ammonia (NH$_3$) from agriculture, both depending on actual meteorological conditions and, in the case of NH$_3$, on the livestock. These are however experimental models currently largely dependent on specific (Czech) data sets and thus their usage is advised to be consulted with the authors.
 
 \section{Output}\label{output}
-
 Emission output in various forms is implemented as a postprocessing
-module (\texttt{postproc}). Postprocessing routines can perform:
-
+module (\verb|postproc|). Postprocessing routines can perform:
 \begin{itemize}
-\item
-  output for specific air quality model(s)
-\item
-  graphical output
+\item output for specific AQ model(s)
+\item graphical output
 \end{itemize}
 
 The postprocessing is switched on by including the row
 \begin{verbatim}
 postproc.run 
 \end{verbatim}
-into the workflow.conf file.
+in the \verb|workflow.conf| file.
 
-Postprocessing is configured in the \texttt{postproc} section of the
-main configuration file. First a list of postprocessing routines to be
-run must be specified in the \texttt{processors} option, eg.:
-
+Postprocessing is configured in the \verb|postproc| section of the
+main configuration file. First, a list of postprocessing routines to be
+run must be specified in the \verb|processors| option, e.g.:
 \begin{verbatim}
 [postproc]
-processors = postproc.cmaq.CMAQAreaWriter,
-postproc.emissplotter.TotalEmissPlotter
+processors = postproc.cmaq.CMAQAreaWriter, postproc.emissplotter.TotalEmissPlotter
 \end{verbatim}
 
 Builtin postprocessing routines include: output into input emission
-files for air quality models CMAQ and CAMx, generic NetCDF output and a
-simple plotter (using \texttt{matplotlib}). Point emissions in CMAQ or
-CAMx format are processed by classes:
-
+files for AQ models CMAQ and CAMx, microscale meteorological and AQ model PALM, generic NetCDF output, and a simple plotter (using \verb|matplotlib|). Point emissions in CMAQ or CAMx format are processed by classes:
 \begin{itemize}
 \item
-  cmaq.CMAQPointWriter
+  \verb|cmaq.CMAQPointWriter|
 \item
-  camx.CAMxPointWriter
+  \verb|camx.CAMxPointWriter|
 \end{itemize}
 
-For the output of area emissions two options are implemented for both
-CMAQ and CAMx. The original version provided by classes
+For the output of area emissions, two options are implemented for both
+CMAQ and CAMx. An older version provided by classes
 \texttt{cmaq.CMAQAreaWriter} and \texttt{camx.CAMxAreaWriter} is more
 flexible, allows for simpler mixing with other postprocessing classes
 (like plotters) at the expense of higher computational cost.
 
-For larger domains and/or higher number of emissions sources, species,
+For larger domains and/or higher volumes of emissions sources, species,
 categories etc., an optimized version is provided by classes
-
 \begin{itemize}
 \item
-  netcdf.AreaTimeDisaggregator
+  \verb|netcdf.AreaTimeDisaggregator|
 \item
-  cmaq.CMAQAreaTimeWriter
+  \verb|cmaq.CMAQAreaTimeWriter|
 \item
-  camx.CAMxAreaTimeWriter
+  \verb|camx.CAMxAreaTimeWriter|
 \end{itemize}
 
-These classes require an intermediate NetCDF file containing total
+These classes require an intermediate NetCDF file containing the total
 emissions to be created prior to their utilization. For that the
-\texttt{netcdf.NetCDFTotalAreaWriter} class is provided. In this
+\verb|netcdf.NetCDFTotalAreaWriter| class is provided. In this
 two-step approach, the intermediate file can be generated in the same
 FUME run as a time series file (by prepending the
-\texttt{NetCDFTotalAreaWriter} class to the list of processors) or in
-any following FUME run (in this case the \texttt{NetCDFTotalAreaWriter}
+\verb|NetCDFTotalAreaWriter| class to the list of processors) or in
+any following FUME run (in this case the \verb|NetCDFTotalAreaWriter|
 class need not be included in the processors list). Each processor has a
-dedicated section in the configuration file (\texttt{netcdfareawriter},
-\texttt{cmaqareawriter} and \texttt{camxareawriter} respectively).
+dedicated section in the configuration file (\verb|netcdfareawriter|,
+\verb|cmaqareawriter| and \verb|camxareawriter| respectively).
 
-Example configuration (writes out the intermediate total emissions file
+An example configuration (writes out the intermediate total emissions file
 and then the CMAQ and CAMx emission time series file):
 
 \begin{verbatim}
 [postproc]
-    processors = postproc.netcdf.NetCDFTotalAreaWriter, postproc.cmaq.CMAQAreaTimeWriter, postproc.camx.CAMxAreaTimeWriter
+    processors = postproc.netcdf.NetCDFTotalAreaWriter, postproc.cmaq.CMAQAreaTimeWriter, 
+                 postproc.camx.CAMxAreaTimeWriter
 
     [[cmaqareawriter]]
         outfile='CMAQ_input_file.nc'
@@ -898,303 +1270,64 @@ and then the CMAQ and CAMx emission time series file):
 In a following FUME run, if the total emissions don't change, the
 NetCDFTotalAreaWriter can be omitted.
 
-Two simple plotter processor are built in:
+The PALM model emission inputs are provided by classes:
+\begin{itemize}
+\item
+  \verb|palm.PALMAreaTimeWriter|
+\item
+  \verb|palm.PALMVsrcTimeWriter|
+\end{itemize}
+The first class creates the 2D emission PALM input with the level of detail two (LOD=2). The second class creates the generic volume sources PALM input file. These classes require an intermediate NetCDF file containing total emissions to be created prior to their utilization. For that the palm.PalmTotalAreaWriter class is provided. An example of the postprocessing section in the FUME configuration for PALM is:
+
+\begin{verbatim}
+[postproc]
+    processors = postproc.palm.PalmTotalAreaWriter, postproc.palm.PALMAreaTimeWriter,
+                 postproc.palm.PALMVsrcTimeWriter
+    
+    [[palmwriter]]
+        totalfile='outputs/${casename}_totals.nc'
+        outfile_area='outputs/${casename}_area.nc'
+        outfile_vsrc='outputs/${casename}_vsrc.nc'
+        static_driver='inputs/${casename}_static'
+        undef=-9999.0
+        acronym='My acronym'
+        author='My name'
+        institution='My institution'
+        palm_version='6.0'
+        data_content='PALM emission created by FUME emission model'
+\end{verbatim}
+
+
+Two simple plotter processors are built in:
 
 \begin{itemize}
 \item
-  emissplotter.EmissPlotter: for each timestep and each species plots a
+  \verb|emissplotter.EmissPlotter|: for each timestep and each species plot a
   figure
 \item
-  emissplotter.TotalEmissPlotter: for each species plots a figure of
+  \verb|emissplotter.TotalEmissPlotter|: for each species plot a figure of
   total (typically per year) emissions
 \end{itemize}
 
-\section{Logging}\label{logging}
-Proper logging of the run is not implemented at the moment. There is a possibility to turn on/off the debugging notices in the main config file --- parameter \verb|debug|. 
+\section{Logging \& reporting}
+\subsection{Logging}\label{logging}
+Logging options can be set in the main config file in the section \verb|[logging]|. There are five levels of log messages: \verb|ERROR|, \verb|WARNING|, \verb|INFO|, \verb|DEBUG|, and \verb|TRACING|. This level can be set by the parameter \verb|level|, by default set to \verb|INFO| which prints information about basic program progress. \verb|DEBUG| provides more detailed information about program progress and includes parameters and values. \verb|TRACING| prints all possible messages. On the other hand with the \verb|WARNING| level, only information about possible problems is printed, and the \verb|ERROR| level shows only messages about serious problems that cause the program termination. Each level prints all messages of the selected and more serious levels. Thus with level \verb|INFO|, the processor prints all messages of \verb|INFO|, \verb|WARNING| and \verb|ERROR| level. The log messages can be also set for different modules separately. This is done in subsection \verb|[[module_levels]]|, e.g.:
+\begin{verbatim}
+[[module_levels]]
+input.ep_sources = DEBUG
+\end{verbatim}
+The option \verb|sql_notices| (True/False) turns on/off notices from in-built PL/pgSQL functions. This is mainly for debugging purposes, thus this value can typically be set to its default value of False. 
 
-\section{Reporting}\label{reporting}
+\subsection{Reporting}\label{reporting}
+FUME offers a reporting feature which serves mainly as a tracking and checking mechanism for user data during processing. It can be configured in the main config file in section \verb|[reporting]|. It provides three reporting options: \verb|RECORD|, \verb|CHECK| and \verb|SUM|. Contrary to logging levels these represent independent types of reports that can be switched on or off by the corresponding option. Type \verb|RECORD| tracks the information about data imported, case settings, etc. Type \verb|CHECK| performs checks over the user data and tries to identify possible inconsistencies like checking whether all categories involved in the case have assigned time factors etc. Type \verb|SUM| calculates checksums during the process namely emission sum aggregated by emission set and species after data import, after chemical speciations, etc. This is especially useful for users to check that speciation profiles are correctly set and assigned to emission categories. Similarly to the logging section, it is possible to define separate report types for different program modules. Example report configuration:
+\begin{verbatim}
+[reporting]
+type = RECORD
+[[module_types]]
+input.ep_static = SUM, RECORD, CHECK
+\end{verbatim}
+This turns on the report of type \verb|RECORD| for the whole FUME run except the import of static data where all types will be produced. The output is one text file for each report type. To distinguish the report files between different FUME runs, those files are named using the timestamp of the FUME start. The location of those files can be changed by the configuration parameter \verb|outfiles_path|.
 
-
-
-\newpage
-\appendix 
-
-\section{Description of input files}\label{description-of-input-files}
-
-\subsection{Static x configuration data}\label{static-x-configuration-data}
-
-All static x configuration files are comma separated text files, with
-quotation marks to mark character strings. The files have one header
-row, with mandatory given column names. The order of the column is
-arbitrary, additional columns may be present. With the only exception
-which are gspro files, the files cannot contain comments nor empty
-lines. Processor is case sensitive.
-
-Path to static (configuration) data is set in config parameter
-\emph{input\_params}.\emph{static}. Required files:
-
-\textbf{Mandatory}
-
-\begin{quote}
-\begin{itemize}
-\item
-  \emph{inventory\_species.csv} - list of inventory species, known
-  internally by FUME
-\item
-  \emph{emission\_categories.csv} - list of defined emission sources
-  categories
-\item
-  \emph{model\_list.csv} - list of chemical models (model, version)
-\item
-  \emph{mechanism\_list.csv} - list of chemical mechanisms
-\item
-  \emph{model\_specie\_names.csv} - list of model species (known for
-  model, version, mechanism)
-\item
-  \emph{sp\_species.csv} - list of speciation species for each chemical
-  mechanism
-\item
-  \emph{tv\_def.csv} - time variation prolie definitions
-\item
-  \emph{tv\_values.csv} - time profile values
-\item
-  \emph{tv\_mapping.csv} - category-time variation profile assignment
-\end{itemize}
-\end{quote}
-
-For \textbf{speciations} either
-
-\begin{quote}
-\begin{itemize}
-\item
-  \emph{gspro files} - files with specie split factors
-\end{itemize}
-\end{quote}
-
-or
-
-\begin{quote}
-\begin{itemize}
-\item
-  \emph{speciation\_profiles.csv} - compound category profiles, only
-  required if speciation profiles (gspro files) are to be created by EP
-  from basic compounds
-\item
-  \emph{compounds.csv} - list of known profile compounds, this is read
-  when \emph{speciation\_profiles.csv} is given
-\item
-  \emph{comp\_mechanisms\_assignment.csv} - assignment of compounds to
-  chemical mechanisms, this is read when \emph{speciation\_profiles.csv}
-  is given
-\end{itemize}
-\end{quote}
-
-or both.
-
-\textbf{Optional}
-
-\begin{quote}
-\begin{itemize}
-\item
-  \emph{sp\_mod\_specie\_mapping.csv} - maps speciation species to model
-  species
-\item
-  \emph{tv\_series.csv} - explicit time factors
-\end{itemize}
-\end{quote}
-
-\subsubsection{General definition inputs}\label{general-definition-inputs}
-
-All files with general input definitions are expected to be in directory
-defined in \emph{static} parameter.
-
-\begin{description}
-\item[\emph{inventory\_species.csv}]
-is a list of input emission species, known internally by FUME, unified
-between different emission inventories. The mapping between each
-emission inventory specie names is given for each inventory (see
-Emissions section). This allows to unify naming conventions across
-inventories like PM25, PM2\_5 to be treated as one specie under one
-name. The file has two columns: name, description. Name defines the
-specie name, description can be empty. All species used in speciations
-as inventory specie or in calculate\_pollutants file must be listed
-here.
-\item[\emph{emission\_categories.csv}]
-defines the emission category (tree) hierarchy, known internally by EP.
-Similarly to species those categories are unified across different
-inventories through mapping file (see Emissions section). The file has
-three columns: cat\_id, name, parent. cat\_id is category id, is integer
-and each category has defined parent category. This is used for
-speciation and time dissagregation. In case the speciation or time
-profile is not found for given source category, FUME searches for the
-profile of parent category. This is recursive, thus the finally used
-profile can be several levels above the given category. If no speciation
-or time profile is found for any parent the sources of this category
-will not be on output (no warning given). parent\_id MUST be lower
-number than cat\_id for correct recursive parent category search.
-\item[\emph{model\_list.csv}]
-is a list of used chemical models. The file has two columns: model,
-version. This is user defined model name/version. Any model name
-appearing in othet input files/config must be listed here.
-\end{description}
-
-\subsubsection{Speciation inputs}\label{speciation-inputs}
-
-All speciation input files are expected to be in
-\emph{static}/speciations directory.
-
-\begin{description}
-\item[\emph{model\_specie\_names.csv}]
-list of model species (known for model, version, mechanism). The file
-has five columns: model, version, mechanism, name, description. This
-species will on output for defined model/mechanism.
-\item[\emph{sp\_species.csv}]
-list of speciation species for each chemical mechanism. The file has
-three columns: mechanism\_name, name, carbons (not used). Each
-speciation specie used in speciation process must be listed here.
-\end{description}
-
-There are two ways of defining speciation profiles that can be combined
-together.
-
-\begin{quote}
-\begin{enumerate}
-\item
-  \begin{description}
-  \item[gspro files]
-  \begin{description}
-  \item[\emph{gspro files}]
-  files with specie split factors, it has 6 columns
-
-  \begin{enumerate}
-  \def\labelenumii{\arabic{enumii}.}
-  \item
-    column \ldots{} category for which the profile is defined
-  \item
-    column \ldots{} inventory specie (``input'' for chemical speciation)
-  \item
-    column \ldots{} chemical mechanism specie (``output'' from chemical
-    speciation)
-  \item
-    column \ldots{} ratio of the output specie in input specie. For
-    mole-based speciation (typically used for gases) this is the number
-    of moles of output specie in 1 mole of input specie (mole split
-    factor). In case of mass-based speciation (typically used for
-    aerosol) this is simply mass ratio of output in input.
-  \item
-    column \ldots{} average molar weight of species in profile for
-    gases, 1 for aerosols
-  \item
-    column is not used in FUME at the moment
-  \end{enumerate}
-
-  The output specie is calculated as: mass of input specie * column 4 /
-  column 5 . In case of gases resulting value is in moles, in case of
-  aerosol it is in grams.
-  \end{description}
-  \end{description}
-\item
-  \begin{description}
-  \item[profiles of basic compounds (gas profiles) (there is probably a
-  bug in treating NVOL/UNR, I do not recommend to use)]
-  Those files are consistent with output files of Chemical Speciation
-  Database by Carter, 2015 (J Air Waste Manag Assoc, 65 (10)) for CMAS
-  Speciation Tool. Those files are only required if speciation profiles
-  are to be created by FUME from basic compounds.
-  \emph{speciation\_profiles.csv} compound category profiles
-
-  \begin{description}
-  \item[\emph{compounds.csv}]
-  list of known profile compounds, this is read when
-  \emph{speciation\_profiles.csv} is given
-  \item[\emph{comp\_mechanisms\_assignment.csv}]
-  assignment of compounds to chemical mechanisms, this is read when
-  \emph{speciation\_profiles.csv} is given
-  \end{description}
-  \end{description}
-\end{enumerate}
-\end{quote}
-
-Where to get chemical speciation files? FUME supports input of
-speciation profiles at the same format as SMOKE, i.e. gspro files. In
-case user has ready gspro files, they can be used directly for FUME
-input. In case the user needs to create his own speciation inputs, the
-process is different for aerosols and gases. Aerosols are typically
-mass-based splited and thus the gspro input is rather straightforward.
-The user needs to obtain information about aerosol composition of
-sources of interest somewhere - e.g. TNO supplements its emission
-database with basic aerosol composition. Considering the user wants to
-define 20 \% OC in PM\_25 for category 100 the corresponding line in
-gspro file is 100,PM\_25,OC,0.2,1,\textless{}anything\textgreater{}
-
-For gases, as mole-based speciated species, the situation is more
-complicated. The typical situation is that inventory contains VOC (or
-equivalent like NMVOC or TOG) which need to be speciated to model
-species like ALK, ALD etc. depending on the model chemical mechanism. To
-do this user needs to know chemical compound composition for different
-categories (e.g. authors employed the information in Passant (2002):
-Speciation of UK emissions of non-methane volatile organic compounds).
-Then the assignment of compounds to model chemical mechanisms needs to
-be given. This assignment is nontrivial. Authors used the Chemical
-Speciation Database by Carter, 2015 (J Air Waste Manag Assoc, 65 (10).
-This tool can be used in two ways. It can generate gspro files from
-given chemical compound profiles, which can be input for FUME. Or,
-alternatively, this tool can be used to generate compounds.csv and
-comp\_mechanisms\_assignment.csv files as mentioned before and FUME will
-use this information to process the chemical speciation itself. GSPRO
-files can be also generated by EPA's software Speciation Tool (available
-at www.cmascenter.org).
-
-\subsubsection{Temporal variation inputs}\label{temporal-variation-inputs}
-
-Time disaggregation can be given as factors for hours, days in week and
-month. This factor is defined as variation from average value for each
-time period. The second possibility to define time variation is to give
-explicit hourly factors (time serie) for period of interest. Both
-possibilities can be combined together.
-
-\subsubsection{Shp time zones}\label{shp-time-zones}
-
-File tz\_world\_mp.shp, included in example data has to be imported in
-order to correctly deal with time zones.
-
-\subsection{Emissions}\label{emissions}
-
-Directory where input data for emission sources are stored is defined by
-configspec parameter \emph{sources} (default is set same as \emph{path}
-parameter).
-
-List of all emission files to be imported are in configspec parameter
-\emph{emission\_inventories}.
-
-Description of emission\_inventories file. This file is a txt file, has
-exactly one header line and is tab separated. It has 5 columns -
-inventory name, inventory version, short name for imported file, file
-name to be imported (it is expected to be in sources directory) and
-infofile expected in the same place. Lines beginning by \# are ignored.
-
-category + species files
-
-emissions input files can be imported in one of two formats: text file,
-shapefile
-
-\subsubsection{inventory inputs list}\label{inventory-inputs-list}
-
-This file is a txt file, has exactly one header line and is tab
-separated. It has 5 columns - inventory name, inventory version, short
-name for imported file, file name to be imported (it is expected to be
-in input.sources directory) and infofile expected in the same place.
-Similarly to configuration text files any blank or comment lines are ignored.
-
-\subsubsection{Emission text files}
-
-Similarly to other input text files it can have arbitrary number of introductory blank or comment lines before one header line. On contrary, no blank or comment lines should come after the header line.
-
-\begin{quote}
-\textbf{met} TODO
-\end{quote}
-
-MEGAN TODO
 
 \end{document}
 

@@ -26,7 +26,7 @@ echo "another postgres user with privilege to create database."
 echo "Press [Enter] key when ready to continue, press Ctrl+C to exit."
 read anytext
 echo -n "Enter database name: "; read dbname
-echo -n "Enter user name or press [Enter] to use your name: "; read username
+echo -n "Enter user name: "; read username
 echo ""
 ##############################
 
@@ -67,13 +67,14 @@ psql -d $dbname -c "create extension postgis;"
 psql -d $dbname -c "create extension postgis_topology;"
 psql -d $dbname -c "create extension intarray;"
 psql -d $dbname -c "grant all on database \"$dbname\" to \"emisproc\" with grant option;"
+psql -d $dbname -c "set client_min_messages to warning;" -h localhost -U $username -f ep_create_database.sql
 psql -d $dbname -c "grant all on spatial_ref_sys to \"emisproc\";"
 psql -d $dbname -c "grant all on spatial_ref_sys_srid_seq to \"emisproc\";"
 
-echo "Database $dbname has been created and postgis has been enabled in it."
-echo "Connect to the database as user $username and run script ep_create_database.sql."
-echo "To run it you can use command:"
-echo "psql -h <hostname> -p <port> -U <username> [-W] -d $dbname -f ep_create_database.sql"
+echo "Database $dbname has been created, postgis has been enabled in it and all necessary FUME related functions were imported."
+#echo "Connect to the database as user $username and run script ep_create_database.sql."
+#echo "To run it you can use command:"
+#echo "psql -h <hostname> -p <port> -U <username> [-W] -d $dbname -f ep_create_database.sql"
 echo "Current connection info is:"
 psql -d $dbname -c "\conninfo"
 
