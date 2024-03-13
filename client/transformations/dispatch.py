@@ -22,9 +22,10 @@ Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
+import fnmatch
 from collections import defaultdict
 from psycopg2 import DataError, ProgrammingError
-from lib.ep_config import ep_cfg, ConfigFile
+from lib.ep_config import ep_cfg, ConfigFile, ConfigValues
 from lib.ep_libutil import ep_connection, ep_rtcfg, ep_internal_path
 
 from lib.db import Relation, get_relation, get_geometry_relation
@@ -113,6 +114,8 @@ def prepare():
                                ep_internal_path('transformations', 'configspec-transformations.conf')).values()
         if ep_cfg.transformations.chains is None:
             chains = [f for f in transconf.transformations if f.mandatory]
+        elif list(ep_cfg.transformations.run_chains):
+            chains = ConfigValues({cname: getattr(ep_cfg.transformations.chains, cname) for cname in ep_cfg.transformations.chains for p in map(str.strip, ep_cfg.transformations.run_chains) if fnmatch.fnmatch(cname, p)})
         else:
             chains = ep_cfg.transformations.chains
     except AttributeError:

@@ -117,8 +117,8 @@ class EmissProvider(DataProvider):
         self.distribute('total_emiss', data=emis)
         cur.close()
 
-    @pack('emiss_levels')
-    def get_emissions_levels(self):
+    @pack('emission_levels')
+    def get_emission_levels(self):
         """
         Fetch total area emission data grouped by species and categories
         from the database and distribute to the receiver objects.
@@ -136,11 +136,11 @@ class EmissProvider(DataProvider):
             cur.close()
             if (not self.emission_levels or self.emission_levels[0] != -1):
                 self.emission_levels.insert(0, -1)
-            log.debug('emiss_levels: ', self.emission_levels)
-            self.distribute('emiss_levels', levels=self.emission_levels)
+            log.debug('emission_levels: ', self.emission_levels)
+            self.distribute('emission_levels', levels=self.emission_levels)
 
-    @pack('number_area_volume_sources')
-    def get_number_area_volume_sources(self):
+    @pack('number_volume_sources')
+    def get_number_volume_sources(self):
         """
         Fetch total area emission data grouped by species and categories
         from the database and distribute to the receiver objects.
@@ -153,7 +153,6 @@ class EmissProvider(DataProvider):
                   'JOIN "{case_schema}"."ep_grid_tz" gr on gr.grid_id = sg.grid_id ' + \
                   'JOIN "{case_schema}".ep_transformation_chains_levels l ' + \
                   '   ON l.chain_id = sg.transformation_chain ' + \
-                  "WHERE sg.source_type IN ('A', 'L') " + \
                   'GROUP BY i, j, l.vertical_level ) vsrc'
         sqltext = sqltext.format(case_schema=self.cfg.db_connection.case_schema)
         log.debug(sqltext)
@@ -161,12 +160,12 @@ class EmissProvider(DataProvider):
         cur.execute(sqltext)
         try:
             nvsrc = cur.fetchone()[0]
-            log.debug('number_area_volume_sources: ', nvsrc)
+            log.debug('number_volume_sources: ', nvsrc)
         except AttributeError:
             pass
         cur.close()
 
-        self.distribute('number_area_volume_sources', nvsrc=nvsrc)
+        self.distribute('number_volume_sources', nvsrc=nvsrc)
 
 
     @pack('area_emiss_by_species_and_category')
@@ -266,6 +265,55 @@ class EmissProvider(DataProvider):
         cur.close()
 
 
+    @pack('point_vsrc_by_species_category_and_level')
+    def get_point_vsrc_by_species_category_and_level(self):
+        """
+        Fetch total point vsrc emission data grouped by species, categories, and levels
+        from the database and distribute to the receiver objects.
+
+        The emissions received are speciated but not time dissagreggated.
+        """
+
+        self.get_species()  # Make sure we have the list of species ready first
+        self.get_categories()  # Make sure we have the list of categories ready first
+        self.get_time_shifts()  # Make sure we have the list of time shifts ready first
+        self.get_emission_levels() # Make sure we have the list of emission levels ready first
+
+        cur = self.db.cursor()
+        q = 'DECLARE c_point_vsrc_by_species_category_and_level CURSOR FOR ' + \
+                    'SELECT g.i, g.j, chl.vertical_level AS level, em.spec_id s, em.cat_id c, z.ts_id z, ' + \
+                    'coalesce(ps.height, 0) as h, sum(em.emiss) e ' + \
+                    'FROM "{case_schema}".ep_sg_emissions_spec em ' + \
+                    'JOIN "{case_schema}".ep_sources_grid sg USING(sg_id) ' + \
+                    'JOIN "{case_schema}".ep_grid_tz g USING(grid_id) ' + \
+                    'JOIN "{case_schema}".ep_timezones z USING(tz_id) ' + \
+                    'JOIN "{case_schema}".ep_transformation_chains_levels chl ' + \
+                    '  ON sg.transformation_chain=chl.chain_id ' + \
+                    'LEFT OUTER JOIN "{source_schema}".ep_in_sources_point ps USING (source_id) ' + \
+                    "WHERE sg.source_type = 'P' " + \
+                    'GROUP BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h ' + \
+                    'ORDER BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h '
+        q = q.format(case_schema=self.cfg.db_connection.case_schema, source_schema=self.cfg.db_connection.source_schema)
+        log.debug('get_point_vsrc_emissions_by_species_category_and_level:', q)
+        cur.execute(q)
+        try:
+            cur2 = self.db.cursor('c_point_vsrc_by_species_category_and_level')
+        except Exception as e:
+            log.debug('cur2 create:', e)
+        try:
+            cur2.itersize = int(self.cfg.db_connection.itersize)
+        except AttributeError:
+            pass
+
+        while True:
+            chunk = cur2.fetchmany(cur2.itersize)
+            if not chunk:
+                break
+            self.distribute('point_vsrc_by_species_category_and_level', data=chunk)
+
+        cur.close()
+
+
     @pack('point_emiss_by_species_and_category')
     def get_point_emissions_by_species_and_category(self):
         """
@@ -303,6 +351,45 @@ class EmissProvider(DataProvider):
             self.distribute('point_emiss_by_species_and_category', data=chunk)
 
         cur.close()
+
+    @pack('point_emiss_by_species_and_category_ij')
+    def get_point_emissions_by_species_and_category_ij(self):
+        """
+        Fetch total point emission data grouped by grid, species, and categories
+        from the database and distribute to the receiver objects.
+
+        The emissions received are speciated but not time dissagreggated.
+        """
+
+        self.get_point_species()  # Make sure we have the list of species ready first
+        self.get_point_categories()  # Make sure we have the list of categories ready first
+        self.get_time_shifts()  # Make sure we have the list of time shifts ready first
+        cur = self.db.cursor()
+
+        cur.execute('DECLARE c_point_emiss_by_species_and_category CURSOR FOR '
+                    'SELECT em.sg_id, em.spec_id s, em.cat_id c, z.ts_id z, sum(em.emiss) e '
+                    'FROM "{case_schema}".ep_sg_emissions_spec em '
+                    'JOIN "{case_schema}".ep_sources_grid sg USING(sg_id) '
+                    'JOIN "{case_schema}".ep_grid_tz g USING(grid_id) '
+                    'JOIN "{case_schema}".ep_timezones z USING(tz_id) '
+                    "WHERE sg.source_type IN ('P') "
+                    'GROUP BY em.sg_id, em.spec_id, em.cat_id, z.ts_id'.format(case_schema=self.cfg.db_connection.case_schema))
+
+        cur2 = self.db.cursor('c_point_emiss_by_species_and_category')
+        try:
+            cur2.itersize = int(self.cfg.db_connection.itersize)
+        except AttributeError:
+            pass
+
+        while True:
+            chunk = cur2.fetchmany(cur2.itersize)
+            if not chunk:
+                break
+
+            self.distribute('point_emiss_by_species_and_category', data=chunk)
+
+        cur.close()
+
 
 
     @pack('area_emiss')

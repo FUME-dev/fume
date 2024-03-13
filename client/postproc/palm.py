@@ -24,6 +24,7 @@ Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
+import math
 import numpy as np
 from netCDF4 import Dataset, date2num
 from postproc.receiver import DataReceiver, requires
@@ -53,7 +54,7 @@ class PalmTotalAreaWriter(NetCDFTotalWriter):
         kwargs['z_var'] = 'level'
         super().setup(*args, **kwargs)
 
-    @requires('categories', 'emiss_levels', 'species')
+    @requires('categories', 'emission_levels', 'species')
     def receive_area_emiss_by_species_category_and_level(self, data):
         self.z_var[:] = self.levels
 
@@ -65,7 +66,7 @@ class PalmTotalAreaWriter(NetCDFTotalWriter):
             self.outvars[spec_idx][ts_idx, cat_idx, z_idx, row[1]-1, row[0]-1] =\
                 (row[6] < 1e+36 and row[6] or self.undef)
 
-    def receive_emiss_levels(self, levels):
+    def receive_emission_levels(self, levels):
         self.levels = levels
         log.debug('levels: ', self.levels)
         self.outfile.createDimension(self.names['z_dim'], len(self.levels))
@@ -121,29 +122,20 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
     def receive_molar_weight(self, molar_weight):
         self.molar_weight = molar_weight
 
-    def receive_emiss_levels(self, levels):
+    def receive_emission_levels(self, levels):
         self.levels = levels
 
     @requires('categories')
     def receive_species(self, species):
         self.species = species
         self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
-        self.create_emiss_file_struct()
+        self.create_2d_emiss_file_struct()
 
     def receive_point_species(self, pspecies):
         self.pspecies = pspecies
-        self.pspecies_lookup = {member[0]: idx for idx, member in enumerate(self.pspecies)}
 
     def receive_point_categories(self, pcategories):
         self.pcategories = pcategories
-        self.pcategories_lookup = {member[0]: idx for idx, member in enumerate(self.pcategories)}
-
-    def receive_stack_params(self, stacks):
-        self.stack_params = stacks
-        self.nstacks = self.stack_params.shape[0]
-        if self.nstacks == 0:
-            return
-        self.stacks_id = list(map(int,self.stack_params[:,0]))
 
     @requires('categories','species','point_species','point_categories','time_shifts', 'molar_weight')
     def receive_point_emiss_ij(self, timestep, data):
@@ -213,7 +205,7 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         self.infile.close()
         self.outfile.close()
 
-    def create_emiss_file_struct(self):
+    def create_2d_emiss_file_struct(self):
         """
          - create netcdf emission variables
          - save time data
@@ -318,8 +310,8 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
         kwargs['v_dim'] = 'nspecies'
         kwargs['no_close_outfile'] =  True
         super().setup(*args, **kwargs)
-        # PALM needs eission flows per m2, emission values are per grid
-        # calculate conversion coefficient (1/gred_area)
+        # PALM needs emission volume flows per m3, emission values are per grid
+        # calculate conversion coefficient (1/grid_volume)
         self.norm_coef = 1.0/(self.cfg.domain.delx*self.cfg.domain.dely*self.cfg.domain.delz)
 
         self.nchars_specname = 64
@@ -329,11 +321,16 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
     def receive_molar_weight(self, molar_weight):
         self.molar_weight = molar_weight
 
-    def receive_emiss_levels(self, levels):
+    def receive_emission_levels(self, levels):
         self.levels = levels
 
-    @requires('species','molar_weight')
-    def receive_number_area_volume_sources(self, nvsrc):
+    @requires('categories')
+    def receive_species(self, species):
+        self.species = species
+        self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
+
+    @requires('categories', 'species','molar_weight')
+    def receive_number_volume_sources(self, nvsrc):
         '''
         recieves number of volume sources from provider
         and creates volume sources netcdf structure (dimension, variables)
@@ -341,7 +338,10 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
         self.nvsrc = nvsrc
         log.debug('nvsrc:', nvsrc)
         if nvsrc > 0:
-            # create netcdf structure for 3d volume sources
+            # create basic structure of vsrc file
+            self.create_vsrc_emiss_file_struct()
+
+            # create netcdf dimensions and variables for 3d volume sources
             default_index = -1   # ijk index
             default_value = 0.0  # volume source value
 
@@ -358,23 +358,37 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
                                                                      fill_value=float(self.cfg.postproc.palmwriter.undef))
                 self.vsrc_value[ispec].missing_value = float(self.cfg.postproc.palmwriter.undef)
                 self.vsrc_value[ispec].lod = 2
-                self.vsrc_value[ispec].units = 'kg/m3/s or mol/m3/s'
+                if self.molar_weight[0, self.species[ispec][0]] == 1: ## HACK
+                    # PM
+                    self.vsrc_value[ispec].units = 'kg/m3/s'
+                else:
+                    # gas
+                    self.vsrc_value[ispec].units = 'mol/m3/s'
                 self.vsrc_value[ispec].long_name = 'volume emission values ' + self.species[ispec][1]
                 self.vsrc_value[ispec].standard_name = vname
                 self.vsrc_value[ispec][:] = 0.0
                 log.debug('Variable ' + vname + ' created')
 
-    @requires('categories')
-    def receive_species(self, species):
-        self.species = species
-        self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
-        self.create_emiss_file_struct()
+    @requires('categories', 'species', 'emission_levels', 'number_volume_sources')
+    def receive_point_vsrc_by_species_category_and_level(self, data):
+        try:
+            self.point_vsrc_emiss
+        except:
+            log.debug('Create list point_vsrc_emiss')
+            self.point_vsrc_emiss = []
+        # receive point_vsrc_emiss
+        log.debug('Receive point_vsrc_emiss rows')
+        for row in data:
+            # i, j, level, spec_id, cat_id, ts_id, height, emiss
+            self.point_vsrc_emiss.append([row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]])
+
 
     def finalize(self):
         """
         Finalization steps
         ------------------
          - write temporary disagregated vsrc emission from total file
+         - write vsrc point emission
          - close the file
         """
 
@@ -393,22 +407,41 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
                 raise IOError
 
             # check needed variables
-            if list(self.static_driver.variables.keys()).index('buildings_3d') < 0:
-                log.error("Static driver does not contain variable buildings_3d. Exit.....")
+            if not ('buildings_2d' in self.static_driver.variables.keys() or \
+                    'buildings_3d' in self.static_driver.variables.keys()):
+                log.error("Static driver does not contain variable buildings_3d or buildings_2d. Exit.....")
                 raise IOError
 
             if list(self.static_driver.variables.keys()).index('zt') < 0:
                 log.error("Static driver does not contain variable zt. Exit.....")
                 raise IOError
 
-            # retrieve buildings_3d and zt data
-            b3d = self.static_driver.variables['buildings_3d'][:].data
             #zt  = self.static_driver.variables['zt'][:].data
             # test delz config parameter
             if hasattr(self.cfg.domain, 'delz') and self.cfg.domain.delz != 0:
                 self.delz = self.cfg.domain.delz
             else:  # it does not exist
                 self.delz = self.cfg.domain.delx
+
+            # retrieve buildings_3d and zt data
+            try:
+                self.b3d = self.static_driver.variables['buildings_3d'][:].data
+            except:
+                # build b3d from b2d
+                b2d = self.static_driver.variables['buildings_2d'][:].data
+                maxh = b2d.max()
+                maxk = math.floor(maxh / self.delz) + 1
+                self.b3d = np.zeros((maxk, np.shape(b2d)[0], np.shape(b2d)[1]), np.int8)
+                for i in range(np.shape(b2d)[1]):
+                    for j in range(np.shape(b2d)[0]):
+                        if b2d[j, i] >= self.delz*0.5:
+                            self.b3d[0:math.floor(b2d[j, i] / self.delz + 0.5)+1, j, i] = 1
+
+            # init ivsrc counter nad vsrc mapper
+            ivsrc = 0
+            vsrc_map_ijk = {}
+
+            # process area vsrc from total emiss file
             # get list of non-zero value locations
             dshape = list(self.infile.dimensions[dname].size for dname in 'level y x'.split())
             # eliminate level -1 used for 2D emission
@@ -423,56 +456,18 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
             # invert values and transpose coordinates to x, y, level
             has_data = ~has_data
             # list coordinates of all filled values
-            ivsrc = 0
             for level, y, x in zip(*has_data.nonzero()):
                 self.vsrc_i[ivsrc] = x
                 self.vsrc_j[ivsrc] = y
                 # locate k index for given level
-                # retrieve building_3d column
-                b = b3d[:, y, x]
-                # locate k index for level = 0
-                ka = np.where(b == 1)[0]
-                if ka.size == 0:
-                    if level == 0:
-                        k = 0
-                    else:
-                        log.fmt_error('No building found in x,y,level = {x}, {y}, {level}. Skipping.', x=x, y=y, level=level)
-                        continue
-                else:
-                    k = ka.max()
-                if level > 0:
-                    # locate k for level>0
-                    b = b[:k+1]
-                    found = False
-                    for l in range(1,level+1):  # levels from 1 to level
-                        # next top of air
-                        ka = np.where(b == 0)[0]
-                        if ka.size == 0:
-                            log.fmt_error('Only level {l} (building) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l, x=x, y=y, level=level)
-                            continue
-
-                        k = ka.max()
-                        b = b[:k+1]
-                        # next top of building
-                        ka = np.where(b == 1)[0]
-                        if ka.size == 0:
-                            if l < level:
-                                log.fmt_error('Only level {l} (ground) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l, x=x, y=y, level=level)
-                            else:
-                                # reached ground
-                                k = 0
-                                found = True
-                        else:
-                            # shrink to next top of the building
-                            k = ka.max()
-                            b = b[:k+1]
-                    if not found:
-                        # k for level not found, do not process point
-                        continue
-
+                k = self.locate_level_k( self.b3d[:, y, x], level, y, x) + 1   # this will place volume source at the first grid above the ground in level
+                if k <= 0:
+                    continue
                 # locate terrain top heigh and k dimension
                 # !!! check with PALM procedure of terrain gridding !!!
-                self.vsrc_k[ivsrc] = k + 1  # this will place volume source at the first grid above the ground in level
+                self.vsrc_k[ivsrc] = k
+                # add key to mapping
+                vsrc_map_ijk[(x,y,k)] = ivsrc
                 level_idx = level + startlevel
                 log.fmt_debug('Found vsrc_k = {vsrc_k} for x,y,level,ivsrc = {x}, {y}, {level}, {ivsrc}.', \
                               vsrc_k=self.vsrc_k[ivsrc], x=x, y=y, level=level, ivsrc=ivsrc)
@@ -500,16 +495,60 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
                                     continue
 
                                 self.vsrc_value[spec_idx][time_idx, ivsrc] += v * time_factor * self.norm_coef * unit_fact
-
                 # increase vsrc counter
                 ivsrc += 1
             # close infile
             self.infile.close()
 
+            # process point sources
+            process_ps = True
+            try:
+                self.point_vsrc_emiss
+            except:
+                process_ps = False
+                pass
+            if process_ps:
+                for row in self.point_vsrc_emiss:
+                    # row = [i, j, level, spec_id, cat_id, ts_id, height, emiss]
+                    # i,j start from 1 in database and from 0 in netcdf
+                    i = row[0]-1
+                    j = row[1]-1
+                    # locate k index for given level
+                    k = self.locate_level_k(self.b3d[:, j, i], row[2], j, i)
+                    # calculate k according height of point source
+                    # ensure it is higher then building
+                    k = max(math.floor(row[6]/self.cfg.domain.delz), k) + 1
+                    # check if i,j,k already exists in vsrc file
+                    try:
+                        jvsrc = vsrc_map_ijk[(i,j,k)]
+                    except:
+                        jvsrc = ivsrc
+                        vsrc_map_ijk[(i, j, k)] = ivsrc
+                        ivsrc += 1
+                        self.vsrc_i[jvsrc] = i
+                        self.vsrc_j[jvsrc] = j
+                        self.vsrc_k[jvsrc] = k
+                    # for ispec in range(len(self.species_lookup)):
+                    cat_id = row[4]
+                    spec_id = row[3]
+                    unit_fact = 1e-3 if (self.molar_weight[(cat_id, spec_id)] == 1) else 1
+                    for ts_id in self.ts:
+                        # ts_idx = self.ts_lookup[ts_id]
+                        for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
+                            dtutc = self.time_shifts[(ts_id, stepdt)]
+                            tf = self.time_factors[dtutc]
+                            try:
+                                time_factor = float(tf[row[4]])
+                            except KeyError:
+                                continue
+                            spec_idx = self.species_lookup[row[3]]
+                            self.vsrc_value[spec_idx][time_idx, jvsrc] += row[7] * time_factor * self.norm_coef * unit_fact
+
         # close out file
         self.outfile.close()
 
-    def create_emiss_file_struct(self):
+
+    def create_vsrc_emiss_file_struct(self):
         """
          - create netcdf emission variables
          - save time data
@@ -563,3 +602,48 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
         except Exception as ex:
             log.debug('Check configuration parameters casename and grid_name.')
             log.debug(ex)
+
+    def locate_level_k(self, b, level, y, x):
+        # locate k index for level = 0
+        ka = np.where(b == 1)[0]
+        if ka.size == 0:
+            if level == 0:
+                k = 0
+            else:
+                log.fmt_error('No building found in x,y,level = {x}, {y}, {level}. Skipping.', x=x, y=y, level=level)
+                return -1
+        else:
+            k = ka.max()
+        if level > 0:
+            # locate k for level>0
+            b = b[:k + 1]
+            found = False
+            for l in range(1, level + 1):  # levels from 1 to level
+                # next top of air
+                ka = np.where(b == 0)[0]
+                if ka.size == 0:
+                    log.fmt_error('Only level {l} (building) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l,
+                                  x=x, y=y, level=level)
+                    return -1
+
+                k = ka.max()
+                b = b[:k + 1]
+                # next top of building
+                ka = np.where(b == 1)[0]
+                if ka.size == 0:
+                    if l < level:
+                        log.fmt_error('Only level {l} (ground) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l,
+                                      x=x, y=y, level=level)
+                    else:
+                        # reached ground
+                        k = 0
+                        found = True
+                else:
+                    # shrink to next top of the building
+                    k = ka.max()
+                    b = b[:k + 1]
+            if not found:
+                # k for level not found, do not process point
+                return -1
+        # return value k
+        return k

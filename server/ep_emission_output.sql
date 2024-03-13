@@ -330,17 +330,64 @@ begin
 
     --create temporary table nazev_tabulky (sg_id integer, pos integer, primary key (sg_id));
     FOR i, j, s, c, e IN
-        EXECUTE FORMAT('SELECT g.i i, g.j j, em.spec_id s, em.cat_id c, sum(em.emiss * t.tv_factor) e
+        EXECUTE FORMAT('SELECT g.i-1 i, g.j-1 j, em.spec_id s, em.cat_id c, sum(em.emiss * t.tv_factor) e
                         FROM %I.ep_sg_emissions_spec em
                         JOIN %I.ep_sources_grid sg USING(sg_id)
                         JOIN %I.ep_time_factors t USING(cat_id)
                         JOIN %I.ep_grid_tz g USING(grid_id)
                         JOIN %I.ep_timezones z USING (tz_id)
                         JOIN %I.ep_time_zone_shifts s USING(ts_id, time_loc)
-                        WHERE s.time_out = $1 AND sg.source_type = ''P''
+                        LEFT OUTER JOIN %I.ep_transformation_chains_levels chl ON sg.transformation_chain=chl.chain_id
+                        WHERE s.time_out = $1 AND sg.source_type = ''P'' AND chl.vertical_level IS NULL
                         GROUP BY g.i, g.j, em.spec_id, em.cat_id
                         ORDER BY g.i, g.j, em.spec_id, em.cat_id',
-                        case_schema,  case_schema, case_schema, case_schema, case_schema, case_schema ) USING t
+                        case_schema,  case_schema, case_schema, case_schema, case_schema, case_schema, case_schema ) USING t
+    LOOP
+        pos_cat =  idx(cat, c);
+        pos_spec =  idx(spec, s);
+        --raise notice 'i,j,spec,category,pos_spec,emiss: %, %, %, %, %',i,j,s,c,e;
+        emis[i][j][pos_cat][pos_spec] = e;
+    END LOOP;
+    return emis;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+DROP FUNCTION IF EXISTS ep_pemiss_time_series_vsrc(integer[],integer[],text);
+
+CREATE OR REPLACE FUNCTION ep_pemiss_time_series_vsrc(
+    cat INTEGER[],
+    spec INTEGER[],
+    case_schema TEXT DEFAULT 'case')
+    RETURNS FLOAT[][][][] AS
+$$
+DECLARE
+    ncat INTEGER;
+    nspec INTEGER;
+    emis FLOAT[][][][];
+    i INTEGER;
+    j INTEGER;
+    s INTEGER;
+    c INTEGER;
+    e FLOAT;
+    pos_cat INTEGER;
+    pos_spec INTEGER;
+begin
+    --raise notice 'ep_pemiss_time_series_vsrc(%,%, %)', spec, case_schema;
+    -- prepare a zero array that will be filled up (time is not in dimension, this function will be called for each timestep)
+    emis = ARRAY_FILL(0.0::FLOAT, ARRAY[m,n,ncat,nspec]);
+
+    --create temporary table nazev_tabulky (sg_id integer, pos integer, primary key (sg_id));
+    FOR i, j, s, c, e IN
+        EXECUTE FORMAT('SELECT g.i i, g.j j, em.spec_id s, em.cat_id c, sum(em.emiss) e
+                        FROM %I.ep_sg_emissions_spec em
+                        JOIN %I.ep_sources_grid sg USING(sg_id)
+                        JOIN %I.ep_grid_tz g USING(grid_id)
+                        WHERE sg.source_type = ''P''
+                        GROUP BY g.i, g.j, em.spec_id, em.cat_id
+                        ORDER BY g.i, g.j, em.spec_id, em.cat_id',
+                        case_schema,  case_schema, case_schema )
     LOOP
         pos_cat =  idx(cat, c);
         pos_spec =  idx(spec, s);

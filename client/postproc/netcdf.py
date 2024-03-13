@@ -323,6 +323,7 @@ class NetCDFAreaTimeDisaggregator(NetCDFWriter):
 
     def receive_categories(self, categories):
         self.categories = categories
+        self.categories_lookup = {member[0]: idx for idx, member in enumerate(self.categories)}
 
     def receive_time_factors(self, factors):
         self.time_factors = factors
@@ -391,11 +392,11 @@ class NetCDFTotalPointWriter(NetCDFWriter):
         kwargs['no_create_y_dim'] = True
         kwargs['no_create_z_dim'] = True
         if 'filename' not in kwargs:
-            if self.cfg.postproc.netcdfareawriter.totalfile:
-                kwargs['filename'] = self.cfg.postproc.netcdfareawriter.totalfile
+            if self.cfg.postproc.netcdfpointwriter.totalfile:
+                kwargs['filename'] = self.cfg.postproc.netcdfpointwriter.totalfile
             else:
                 log.error('Missing configuration parameter postproc.netcdfareawriter.totalfile!')
-
+        super().setup(*args, **kwargs)
 # do this within the receive stack params, as it tells the size of the z-dimension (numstk)
 #        self.outfile.createDimension(self.names['z_dim'], self.cfg.domain.nz)
         self.outfile.createDimension(self.names['y_dim'], 1)
@@ -654,19 +655,21 @@ class NetCDFPointTimeDisaggregator(NetCDFWriter):
         # we need the total point file here to extract information about the stacks
         self.infile = Dataset(self.cfg.postproc.netcdfpointwriter.totalfile)
         self.numstk = len(self.infile.dimensions['z'])
-        if self.actions['create_z_dim']:
-            self.outfile.createDimension(self.names['z_dim'], self.numstk)
-        if self.actions['create_y_dim']:
-            self.outfile.createDimension(self.names['y_dim'],1)
-        if self.actions['create_x_dim']:
-            self.outfile.createDimension(self.names['x_dim'],1)
-        if self.actions['create_t_dim']:
-            self.outfile.createDimension(self.names['t_dim'], None)
+#        if self.actions['create_z_dim']:
+        self.outfile.createDimension(self.names['z_dim'], self.numstk)
+#        if self.actions['create_y_dim']:
+        self.outfile.createDimension(self.names['y_dim'],1)
+#        if self.actions['create_x_dim']:
+        self.outfile.createDimension(self.names['x_dim'],1)
+
+#        if self.actions['create_t_dim']:
+##            self.outfile.createDimension(self.names['t_dim'], None)
+
         # copy stack attributes to the dissagregated file
         toinclude = ["ISTACK", "STKCNT", "ROW", "COL", "LMAJOR", "LPING", "LATITUDE", "LONGITUDE", "STKDM", "STKHT", "STKTK", "STKVE", "STKFLW", "XLOCA", "YLOCA"]
         for name, variable in self.infile.variables.items():
             if name  in toinclude:
-                x = self.outfile.createVariable(name, variable.datatype, (self.names['z_dim']))
+                x = self.outfile.createVariable(name, variable.datatype, (self.names['z_dim'],))
                 x.setncatts(self.infile.variables[name].__dict__)
                 x[:] = self.infile.variables[name][:]
 

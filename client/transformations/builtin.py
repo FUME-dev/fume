@@ -440,13 +440,13 @@ class SurrogateTransformation(OneToOneTransformation):
             outschema = ''
             outtable = '"{}"'.format(self.outrelation.name)
             surtable = '"{}"'.format(surname)
-            surtablex = '{}'.format(surname)
+            surtablex = '"{}"'.format(surname)
             sqltemp = ' TEMP '
         else:
             outschema = case_schema
             outtable = '"{}"."{}"'.format(case_schema, self.outrelation.name)
             surtable = '"{}"."{}"'.format(case_schema, surname)
-            surtablex = '{}.{}'.format(case_schema, surname)
+            surtablex = '"{}"."{}"'.format(case_schema, surname)
             sqltemp = ''
 
         # mask surrogate_set to grid from performance reasons (it should be possible to use MaskToGrid transformation)
