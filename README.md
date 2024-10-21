@@ -29,7 +29,7 @@ Software is distributed free of charge under the licence GNU GPL v3.0. View on [
 
 ## Citing
 Here we give you a recommended citing of the FUME:
-* Belda, M., Benešová, N., Resler, J., Huszár, P., Vlček, O., Krč, P., Karlický, J., Juruš, P., and Eben, K.: FUME 2.0 – Flexible Universal processor for Modeling Emissions, EGUsphere [preprint], https://doi.org/10.5194/egusphere-2023-2740, 2024.
+* Belda, M., Benešová, N., Resler, J., Huszár, P., Vlček, O., Krč, P., Karlický, J., Juruš, P., and Eben, K.: FUME 2.0 – Flexible Universal processor for Modeling Emissions, Geosci. Model Dev., 17, 3867–3878, https://doi.org/10.5194/gmd-17-3867-2024, 2024.
 * Benešová, N., Belda, M., Eben, K., Geletič, J., Huszár, P., Juruš, P., Krč, P., Resler, J. and Vlček, O. (2018): New open source emission processor for air quality models. In Sokhi, R., Tiwari, P. R., Gállego, M. J., Craviotto Arnau, J. M., Castells Guiu, C. & Singh, V. (eds) *Proceedings of Abstracts 11th International Conference on Air Quality Science and Application*. DOI: 10.18745/PB.19829. (pp. 27). Published by University of Hertfordshire. Paper presented at Air Quality 2018 conference, Barcelona, 12-16 March.
 
 ## Support
