@@ -38,3 +38,15 @@ The developing team does not provide a regular support. But we are ready and wil
 
 ## Acknowledgement
 The first version of emission processor FUME (Flexible Universal processor for Modeling Emissions) was created within the project of the Technology Agency of the Czech Republic No. TA04020797 *Advanced emission processor utilizing new data sources*. 
+
+## Publications
+A list of publications that utilized FUME:
+* Prieto Perez, A.P., Huszár, P. and Karlický, J.: Validation of multi-model decadal simulations of present-day central European air-quality, Atmos. Environ., 349, 121077, https://doi.org/10.1016/j.atmosenv.2025.121077, 2025.
+* Bartík, L., Huszár, P., Karlický, J., Vlček, O., and Eben, K.: Modeling the drivers of fine PM pollution over Central Europe: impacts and contributions of emissions from different sources, Atmos. Chem. Phys., 24, 4347–4387, https://doi.org/10.5194/acp-24-4347-2024, 2024.
+* Huszar, P., Prieto Perez​​​​​​​, A. P., Bartík, L., Karlický, J., and Villalba-Pradas, A.: Impact of urbanization on fine particulate matter concentrations over central Europe, Atmos. Chem. Phys., 24, 397–425, https://doi.org/10.5194/acp-24-397-2024, 2024.
+* Liaskoni, M., Huszár, P., Bartík, L., Prieto Perez, A. P., Karlický, J., and Šindelářová, K.: The long-term impact of biogenic volatile organic compound emissions on urban ozone patterns over central Europe: contributions from urban and rural vegetation, Atmos. Chem. Phys., 24, 13541–13569, https://doi.org/10.5194/acp-24-13541-2024, 2024.
+* Liaskoni, M., Huszar, P., Bartík, L., Prieto Perez, A. P., Karlický, J., and Vlček, O.: Modelling the European wind-blown dust emissions and their impact on particulate matter (PM) concentrations, Atmos. Chem. Phys., 23, 3629–3654, https://doi.org/10.5194/acp-23-3629-2023, 2023.
+* Huszar, P., Karlický, J., Bartík, L., Liaskoni, M., Prieto Perez, A. P., and Šindelářová, K.: Impact of urbanization on gas-phase pollutant concentrations: a regional-scale, model-based analysis of the contributing factors, Atmos. Chem. Phys., 22, 12647–12674, https://doi.org/10.5194/acp-22-12647-2022, 2022.
+* Huszar, P., Karlický, J., Marková, J., Nováková, T., Liaskoni, M., and Bartík, L.: The regional impact of urban emissions on air quality in Europe: the role of the urban canopy effects, Atmos. Chem. Phys., 21, 14309–14332, https://doi.org/10.5194/acp-21-14309-2021, 2021.
+* Huszar, P., Karlický, J., Ďoubalová, J., Nováková, T., Šindelářová, K., Švábik, F., Belda, M., Halenka, T., and Žák, M.: The impact of urban land-surface on extreme air pollution over central Europe, Atmos. Chem. Phys., 20, 11655–11681, https://doi.org/10.5194/acp-20-11655-2020, 2020.
+* Huszar, P., Karlický, J., Ďoubalová, J., Šindelářová, K., Nováková, T., Belda, M., Halenka, T., Žák, M., and Pišoft, P.: Urban canopy meteorological forcing and its impact on ozone and PM2.5: role of vertical turbulent transport, Atmos. Chem. Phys., 20, 1977–2016, https://doi.org/10.5194/acp-20-1977-2020, 2020.
