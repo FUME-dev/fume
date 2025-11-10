@@ -41,6 +41,7 @@ The first version of emission processor FUME (Flexible Universal processor for M
 
 ## Publications
 A list of publications that utilized FUME:
+* Bartík, L., Huszár, P., Peiker, J., Karlický, J., Vlček, O., and Vodička, P.: Modeling organic aerosol over Central Europe: uncertainties linked to different chemical mechanisms, parameterizations, and boundary conditions, Atmos. Chem. Phys., 25, 15301–15328, https://doi.org/10.5194/acp-25-15301-2025, 2025.
 * Prieto Perez, A.P., Huszár, P. and Karlický, J.: Validation of multi-model decadal simulations of present-day central European air-quality, Atmos. Environ., 349, 121077, https://doi.org/10.1016/j.atmosenv.2025.121077, 2025.
 * Bartík, L., Huszár, P., Karlický, J., Vlček, O., and Eben, K.: Modeling the drivers of fine PM pollution over Central Europe: impacts and contributions of emissions from different sources, Atmos. Chem. Phys., 24, 4347–4387, https://doi.org/10.5194/acp-24-4347-2024, 2024.
 * Huszar, P., Prieto Perez​​​​​​​, A. P., Bartík, L., Karlický, J., and Villalba-Pradas, A.: Impact of urbanization on fine particulate matter concentrations over central Europe, Atmos. Chem. Phys., 24, 397–425, https://doi.org/10.5194/acp-24-397-2024, 2024.
