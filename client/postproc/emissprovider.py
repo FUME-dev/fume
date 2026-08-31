@@ -17,9 +17,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -56,7 +56,9 @@ class EmissProvider(DataProvider):
         log.debug('Fetching grid coordinates...')
         cur.execute('SELECT i, j, xmi, xma, ymi, yma FROM "{}"."{}"'.format(self.cfg.db_connection.conf_schema, self.cfg.domain.grid_name))
 
-        grid_x = np.zeros((self.cfg.domain.ny+1, self.cfg.domain.nx+1), dtype='f')
+        grid_x = np.zeros((self.rt_cfg['domain']['ny'] + 1,
+                                            self.rt_cfg['domain']['nx']+1),
+                          dtype='f')
         grid_y = np.zeros_like(grid_x)
         for rec in cur:
             if rec[0] == 1:
@@ -69,6 +71,25 @@ class EmissProvider(DataProvider):
 
         cur.close()
         self.distribute('grid', grid_x, grid_y)
+
+
+    @pack('domain_geometry')
+    def get_domain_geometry(self):
+        """
+        Fetch domain grid (polygon) geometries (original, not divided to
+        timezones) as WKT text from the database and distribute to the receiver
+        objects.
+        """
+
+        conf_schema = self.cfg.db_connection.conf_schema
+        grid_name = self.cfg.domain.grid_name
+        log.debug('Fetching domain geometries...')
+        with self.db.cursor() as cur:
+            cur.execute('SELECT grid_id, ST_AsText(geom) FROM "{'
+                        'conf_schema}"."{grid_name}"'.
+                        format(conf_schema=conf_schema, grid_name=grid_name))
+            self.distribute('domain_geometry', geom=cur.fetchall())
+
 
     @pack('time_shifts')
     def get_time_shifts(self):
@@ -109,7 +130,8 @@ class EmissProvider(DataProvider):
 
         q = 'SELECT ep_total_emissions(%s, %s, %s, %s, %s)'
         log.debug('Fetching total area emissions...')
-        cur.execute(q, (self.cfg.domain.nx, self.cfg.domain.ny, self.cfg.domain.nz,
+        cur.execute(q, (self.rt_cfg['domain']['nx'], self.rt_cfg['domain'][
+            'ny'], self.rt_cfg['domain']['nz'],
                         [int(i[0]) for i in self.species],
                         self.cfg.db_connection.case_schema))
 
@@ -282,7 +304,8 @@ class EmissProvider(DataProvider):
         cur = self.db.cursor()
         q = 'DECLARE c_point_vsrc_by_species_category_and_level CURSOR FOR ' + \
                     'SELECT g.i, g.j, chl.vertical_level AS level, em.spec_id s, em.cat_id c, z.ts_id z, ' + \
-                    'coalesce(ps.height, 0) as h, sum(em.emiss) e ' + \
+                    'coalesce(ps.height, 0) as h, coalesce(ps.diameter, 0) as d, coalesce(ps.temperature, 0) as t, ' + \
+                    'coalesce(ps.velocity, 0) as v, sum(em.emiss) e ' + \
                     'FROM "{case_schema}".ep_sg_emissions_spec em ' + \
                     'JOIN "{case_schema}".ep_sources_grid sg USING(sg_id) ' + \
                     'JOIN "{case_schema}".ep_grid_tz g USING(grid_id) ' + \
@@ -291,8 +314,8 @@ class EmissProvider(DataProvider):
                     '  ON sg.transformation_chain=chl.chain_id ' + \
                     'LEFT OUTER JOIN "{source_schema}".ep_in_sources_point ps USING (source_id) ' + \
                     "WHERE sg.source_type = 'P' " + \
-                    'GROUP BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h ' + \
-                    'ORDER BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h '
+                    'GROUP BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h, d, t, v ' + \
+                    'ORDER BY g.i, g.j, level, em.spec_id, em.cat_id, z.ts_id, h, d, t, v '
         q = q.format(case_schema=self.cfg.db_connection.case_schema, source_schema=self.cfg.db_connection.source_schema)
         log.debug('get_point_vsrc_emissions_by_species_category_and_level:', q)
         cur.execute(q)
@@ -404,12 +427,13 @@ class EmissProvider(DataProvider):
         Uses the self.species list read by the get_species method.
         """
 
-        self.get_species() # Make sure we have the list of species ready first
+        self.get_species()  # Make sure we have the list of species ready first
         cur = self.db.cursor()
         for i in range(self.cfg.run_params.time_params.num_time_int):
             q = 'SELECT ep_emiss_time_series(%s,%s,%s,%s,%s,%s::text,%s)'
             log.debug('Fetching area emissions for timestep', i)
-            cur.execute(q, (self.cfg.domain.nx, self.cfg.domain.ny, self.cfg.domain.nz,
+            cur.execute(q, (self.rt_cfg['domain']['nx'], self.rt_cfg[
+                'domain']['ny'], self.rt_cfg['domain']['nz'],
                             [int(i[0]) for i in self.ep_species], self.rt_cfg['run']['datestimes'][i],
                             self.cfg.db_connection.case_schema,
                             self.cfg.run_params.output_params.save_time_series_to_db))
@@ -419,12 +443,60 @@ class EmissProvider(DataProvider):
             ep_species_names = [s[1] for s in self.ep_species]
             if len(ep_species_names) == 0:
                 log.fmt_debug('WARNING: no emissions computed internally with FUME for timestep {}. It will continue anyway trying to collect emissions from external models.', i)
-                emis, sp = combine_model_emis(ep_emis, ep_species_names ,i, noanthrop = True)
+                emis, sp = combine_model_emis(ep_emis, ep_species_names, i, noanthrop = True)
             else:
-                emis, sp = combine_model_emis(ep_emis, ep_species_names ,i )
+                emis, sp = combine_model_emis(ep_emis, ep_species_names, i)
             self.distribute('area_emiss', timestep=i, data=emis)
 
         cur.close()
+
+
+    @pack('area_emiss_polygon')
+    def get_area_emission_polygon(self):
+        """
+        Fetch area emission data from the database and distribute to the
+        receiver objects. This is a version for general polygon output (
+        no-grid geometries).
+        """
+
+        case_schema = self.cfg.db_connection.case_schema
+        conf_schema = self.cfg.db_connection.conf_schema
+        grid_name = self.cfg.domain.grid_name
+        log.debug('Fetching area emission polygons.')
+        with self.db.cursor() as cur:
+            cur.execute('SELECT grid_id_orig, spec_id, sum(em.emiss) '
+                 'FROM "{case_schema}".ep_sg_emissions_spec em '
+                 'JOIN "{case_schema}".ep_sources_grid sg USING(sg_id) '
+                 'JOIN "{case_schema}".ep_grid_tz g USING(grid_id) '
+                 'JOIN "{conf_schema}"."{grid_name}" gorig ON grid_id_orig = '
+                        'gorig.grid_id '
+                 "WHERE source_type IN ('A', 'L') "
+                 "GROUP BY em.spec_id, grid_id_orig".
+                        format(case_schema=case_schema,
+                               conf_schema=conf_schema, grid_name=grid_name))
+
+            self.distribute('area_emiss_polygon', data=cur.fetchall())
+
+
+    @pack('point_total_emiss')
+    def get_point_total_emiss(self):
+        """
+        Fetch point total emission data from the database and distribute to the
+        receiver objects.
+        """
+
+        case_schema = self.cfg.db_connection.case_schema
+        log.debug('Fetching point emissions.')
+        with self.db.cursor() as cur:
+            cur.execute('SELECT em.sg_id, em.spec_id, sum(em.emiss) emiss '
+            'FROM "{case_schema}".ep_sg_emissions_spec em '
+            'JOIN "{case_schema}".ep_sources_grid sg USING(sg_id) '
+            "WHERE sg.source_type IN ('P') "
+            'GROUP BY em.sg_id, em.spec_id'.format(
+                case_schema=case_schema))
+
+            self.distribute('point_total_emiss', data=cur.fetchall())
+
 
     @pack('species')
     def get_species(self):
@@ -448,6 +520,35 @@ class EmissProvider(DataProvider):
             log.fmt_debug('Species from FUME and other models: {}.', ','.join([s[1] for s in self.species]))
 
             self.distribute('species', species=self.species)
+
+    @pack('specie_type')
+    def get_specie_type(self):
+        """
+        Fetch a list of all output specie types used in the case by
+        calling the {case_schema}.get_species view and save as self.specie_type
+        list of spec_id
+        """
+
+        # Make sure to call the view only once and save the results for later use
+        try:
+            self.specie_type
+        except AttributeError:  # Read the list from the database is it does not exist
+            self.specie_type = {}
+            q = 'SELECT spec_mod_id, min(mol_weight) AS molar_weight_min, max(mol_weight) AS molar_weight_max' \
+                ' FROM "{}".ep_mod_spec_factors_all' \
+                ' GROUP BY spec_mod_id' \
+                ' ORDER BY spec_mod_id'.format(self.cfg.db_connection.case_schema)
+            log.debug('Getting a list of species types...', q)
+            cur = self.db.cursor()
+            cur.execute(q)
+            for m in cur.fetchall():
+                if m[1] == m[2] == 1:
+                   self.specie_type[m[0]] = 1  # PM
+                else:
+                    self.specie_type[m[0]] = 0  # gas
+            # log.fmt_debug('Specie type from FUME: {}.', ','.join([c[1] for c in self.get_specie_type]))
+            self.distribute('specie_type', specie_type=self.specie_type)
+            cur.close()
 
     @pack('categories')
     def get_categories(self):
@@ -533,6 +634,7 @@ class EmissProvider(DataProvider):
             self.distribute('point_emiss', timestep=i, data=emis)
         cur.close()
 
+    '''
     @pack('point_emiss_ij')
     def get_point_emission_time_series_ij(self):
         self.get_point_categories()
@@ -543,16 +645,22 @@ class EmissProvider(DataProvider):
             log.debug('Fetching point emissions ij for timestep', i)
             log.debug(q)
             pcat = [int(i[0]) for i in self.pcategories]
-            pspec = [int(i[0]) for i in self.pspecies]
-            if len(pcat) > 0 and len(pspec) > 0 :
-                log.debug('pcat:', pcat)
-                log.debug('pspec:', pspec)
-                cur.execute(q, (pcat, pspec, self.rt_cfg['run']['datestimes'][i], self.cfg.db_connection.case_schema))
-                emis = np.array(cur.fetchone()[0])
-                log.debug('emis:', emis.shape)
-                self.distribute('point_emiss_ij', timestep=i, data=emis)
+            for pc in pcat:
+                pca = [pc]
+                pspec = [int(i[0]) for i in self.pspecies]
+                #if len(pcat) > 0 and len(pspec) > 0 :
+                if len(pca) > 0 and len(pspec) > 0:
+                    #log.debug('pcat:', pcat)
+                    log.debug('pcat:', pca)
+                    log.debug('pspec:', pspec)
+                    #cur.execute(q, (pcat, pspec, self.rt_cfg['run']['datestimes'][i], self.cfg.db_connection.case_schema))
+                    cur.execute(q, (pca, pspec, self.rt_cfg['run']['datestimes'][i], self.cfg.db_connection.case_schema))
+                    emis = np.array(cur.fetchone()[0])
+                    log.debug('emis:', emis.shape)
+                    self.distribute('point_emiss_ij', timestep=i, cat_id=pc, data=emis)
         log.sql_debug(self.db)
         cur.close()
+    '''
 
     @pack('stack_params')
     def get_point_sources_params(self):
@@ -568,7 +676,8 @@ class EmissProvider(DataProvider):
             with self.db.cursor() as cur:
                 cur.execute(q)
                 if cur.rowcount > 0:
-                    self.stacks = np.array(cur.fetchall(), dtype=np.float).squeeze(axis=1)
+                    self.stacks = np.array(cur.fetchall(),
+                                           dtype=np.double).squeeze(axis=1)
                 else:
                     self.stacks = np.array([], dtype=np.float)
 

@@ -15,9 +15,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 */
 
@@ -100,17 +100,19 @@ begin
     
     -- create temp views for convert_to_row function
     execute 'DROP VIEW IF EXISTS spec_mapping';
-    execute format('CREATE TEMP VIEW spec_mapping AS SELECT * FROM %I.%I WHERE inv_id = %s', schema, specmap_table, inv_id);
+    execute format('CREATE TEMP VIEW spec_mapping AS SELECT distinct(orig_name) FROM %I.%I WHERE inv_id = %s', schema, specmap_table, inv_id);
     execute 'DROP VIEW IF EXISTS cat_mapping';
     execute format('CREATE TEMP VIEW cat_mapping AS 
-                        SELECT * FROM %I.ep_classification_mapping WHERE inv_id = %s', schema, inv_id);
+                        SELECT distinct(orig_cat_id) FROM %I.ep_classification_mapping WHERE inv_id = %s', schema, inv_id);
 
     -- convert raw_table view to row format for both specie and category 
+    execute format('DROP TABLE IF EXISTS row_raw_emiss;');
     execute 'SELECT ep_convert_to_row_table($1, $2, $3, $4, $5, $6, $7)' using
                   schema, table_raw, specie_input_type, specie_def, specie_val, category_input_type, category_def;
     
     -- populate emission table
     -- test if category and specie names are defined in mapping tables
+    execute format('DROP TABLE IF EXISTS emis_before_scenario;');
     sqltext = format('CREATE TEMP TABLE emis_before_scenario ON COMMIT DROP AS 
                       SELECT source_id, m.%I, cat.cat_id, e.source_orig_id, (replace(emiss_orig::text, '','', ''.'')::double precision)*conv_factor AS %s '
                       'FROM row_raw_emiss AS e
@@ -291,7 +293,7 @@ begin
         end if;
     end if;
     
-    execute format('CREATE TEMP TABLE row_raw_emiss ON COMMIT DROP AS 
+    execute format('CREATE TEMP TABLE row_raw_emiss ON COMMIT DROP AS
        SELECT source_orig_id, ' || 
               cattext || ' AS orig_cat_id, ' || 
               spectext || ' AS orig_name, ' ||

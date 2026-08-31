@@ -119,6 +119,16 @@ Configuration is a customized ConfigObj object allowing access via attributes, e
 
     nx = ep_cfg.domain_params.nx
 
+Runtime configuration, i.e. parameters that are calculated in the runtime, is saved in
+the ``ep_rtcfg`` object of the ``ep_config`` module.
+
+Spatial and temporal configuration of the case is processed in the ``case.prepare_conf``
+function, parameters needed for further processing are saved in ``ep_rtcfg``. All modules
+that rely on those parameters being precalculate must make sure to run ``case.prepare_conf``
+(the function checks whether it has already been run so running it multiple times doesn't 
+overwrite the configuration), e.g. in the __init__.py of the module.
+
+
 
 Database connection
 ===================

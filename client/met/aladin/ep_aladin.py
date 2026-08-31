@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -26,6 +26,7 @@ import os
 
 import numpy as np
 from datetime import datetime, timedelta, timezone
+from glob import glob
 import pygrib
 from lib.ep_config import ep_cfg
 import lib.ep_logging
@@ -43,12 +44,13 @@ model_names = { # here we put the indicatorOfParameter, typeOfLevel, and level k
 "par" : (111, "heightAboveGround", 0,1.),
 "ps"  : (1, "heightAboveGround", 0,1.),
 "pa"  : (1, "hybrid", None,1.),
-"zf"  : (6, "hybrid", None,1.),
+#"zf"  : (6, "hybrid", None,1.),
+"zf"  : None,
 "ua"  : (33, "hybrid", None,1.),
 "va"  : (34, "hybrid", None,1.),
 "uas" : (33, "heightAboveGround" , 10,1.),
 "vas" : (34, "heightAboveGround" , 10,1.),
-"windspd"  : None,
+"wndspd"  : None,
 "wndspd10m": None,
 "pr" : (61, "heightAboveGround", 0 ,1.), # indicatorOfParameter=61 in ALADIN gribs corresponds to the accumulated total precipitation [kg/m^2]
 "pr24":(61, "heightAboveGround", 0 ,1.),
@@ -79,148 +81,174 @@ def grb2dt(fobj):
         tdelta = timedelta(hours=stepUnits*startStep)
         return(datetime(syyyy, smm, sdd, shh, smmin, tzinfo=timezone.utc)+tdelta)
 
-def get_aladin(grbf, t, fields, deaccumulated = None, totaltstep = None):
-    numfields = len(fields)
+def get_aladin(infilename, t, met_vars):
+    """
+    Get the fields from specific ALADIN input file (given by file name)
+    The timestep t is always 0
+    """
+    numfields = len(met_vars)
     data_list = np.empty((numfields),dtype=object) # this numpy will contains the met_data class objects for the timestep t
-    infilename = grbf.name
+
     infileindex = pygrib.index(infilename, 'indicatorOfParameter', 'typeOfLevel', 'level')
     infileindex3d = pygrib.index(infilename, 'indicatorOfParameter', 'typeOfLevel')
-
-    for i,f in enumerate(fields):
-        if model_names[f]: 
-            if f not in ['pr', 'par']:
-                if model_names[f][1] == "hybrid":
-                    data = np.flip(np.array([v.values*model_names[f][3] for v in infileindex3d.select(indicatorOfParameter=model_names[f][0], typeOfLevel = "hybrid")[:]]).transpose(), axis=2)
-                else:
-                    data = (infileindex.select(indicatorOfParameter=model_names[f][0],typeOfLevel=model_names[f][1], level=model_names[f][2])[0].values * model_names[f][3]).transpose()
-                
-                data_list[i] = met.ep_met_data.ep_met_data(f, data)
+    for i,f in enumerate(met_vars):
+        if model_names[f]:
+            if model_names[f][1] == "hybrid":
+                data = np.flip(np.array([v.values*model_names[f][3] for v in infileindex3d.select(indicatorOfParameter=model_names[f][0], typeOfLevel = "hybrid")[:]]).transpose(), axis=2)
             else:
-                data = deaccumulated[f][totaltstep].transpose() 
-                data_list[i] = met.ep_met_data.ep_met_data(f, data)
+                data = (infileindex.select(indicatorOfParameter=model_names[f][0],typeOfLevel=model_names[f][1], level=model_names[f][2])[0].values * model_names[f][3]).transpose()
+            data_list[i] = met.ep_met_data.ep_met_data(f, data)
+        elif f  == 'wndspd':
+            datau = np.flip(np.array([v.values * model_names['ua'][3] for v in infileindex3d.select(indicatorOfParameter=model_names['ua'][0], typeOfLevel=model_names['ua'][1])[:]]).transpose(), axis=2)
+            datav = np.flip(np.array([v.values * model_names['va'][3] for v in infileindex3d.select(indicatorOfParameter=model_names['va'][0], typeOfLevel=model_names['va'][1])[:]]).transpose(), axis=2)
+            data = np.sqrt(datau**2 + datav**2)
+            data_list[i]  = met.ep_met_data.ep_met_data(f,data[:,:,:])
         elif f  == 'wndspd10m':
             datau = infileindex.select(indicatorOfParameter=model_names['uas'][0],typeOfLevel=model_names['uas'][1], level=model_names['uas'][2])[0].values * model_names['uas'][3]
             datav = infileindex.select(indicatorOfParameter=model_names['vas'][0],typeOfLevel=model_names['vas'][1], level=model_names['vas'][2])[0].values * model_names['vas'][3]
             data = (np.sqrt(datau**2 + datav**2)).transpose()
             data_list[i]  = met.ep_met_data.ep_met_data(f,data[:,:])
-        elif f == 'pr24':
-            data   = (deaccumulated['pr'][totaltstep]*3600*24).transpose() # kg.m-2.s-1 * 1 hour * 24
-            data_list[i] = met.ep_met_data.ep_met_data(f, data)
+        elif f == 'zf':
+            geop_z = np.flip(np.array([v.values for v in infileindex3d.select(indicatorOfParameter=6, typeOfLevel="hybrid")
+                                      [:]]).transpose(), axis=2)
+            geop_ter = np.array(infileindex.select(indicatorOfParameter=6, typeOfLevel="heightAboveGround", level=0)[0].values).transpose()
+            zf = (geop_z - geop_ter[:,:,np.newaxis]) / 9.81
+            data_list[i] = met.ep_met_data.ep_met_data(f, zf)
 
     return(data_list)
 
-def ep_aladin_met(fields,datestimes):
+def ep_aladin_met_modeldates(datestimes):
     """
-    Main import module, returns list of numpy arrays corresponding to the needed met fields in fields for the list of datestimes (datetime class) 
+    Main import module, returns list of numpy arrays corresponding to the needed met fields in met_vars for the list of datestimes (datetime class)
         Parameters:
-            fields: list of strings of field names
             datestimes: list of python datetime objects for which one needs met data
         Returns:
-            f: list of ep_met_data_objects for each timestep defined in datestimes            
+            modeldates: list of meteo model timesteps covering datestimes
     """
 
     # first, find out the model dates and save along the information of in which file it is
-    grbf =  []
     modeldates = []
     delta_t = ep_cfg.input_params.met.met_tolerance # in seconds
     delta_t_obj = timedelta(seconds = delta_t)
+    met_files = ep_cfg.input_params.met.met_files
 
-    for f in ep_cfg.input_params.met.met_files:
-        fn = os.path.join(ep_cfg.input_params.met.met_path, f)
-        try:
-            grbf.append(pygrib.open(fn))
-        except (RuntimeError, OSError): 
-            log.fmt_error('EE: Fatal error. Unable to open file {}. \nExit!', fn)
-            raise
+    for f in met_files:
+        fp = os.path.join(ep_cfg.input_params.met.met_path, f)
+        for fn in glob(fp):
+            try:
+                grbf = pygrib.open(fn)
+            except (RuntimeError, OSError):
+                log.fmt_error('EE: Fatal error. Unable to open file {}. \nExit!', fn)
+                raise
 
-        ntimes = 1 # we assume one grb file contains one timestep
-
-        t = 0
-        modeldates.append((grbf[-1], grb2dt(grbf[-1]), t ))
+            try:
+                log.fmt_debug('Grib file {} added to meteorological inputs.', fn)
+                ntimes = 1 # we assume one grb file contains one timestep
+                t = 0
+                modeldates.append((fn, grb2dt(grbf), t ))
+            finally:
+                grbf.close()
 
     if not isinstance(datestimes,list):
         datestimes = [datestimes]
 
-    numtimes = len(datestimes)
+    modeldates.sort(key=lambda x: x[1])
+    #numtimes = len(datestimes)
 
     if datestimes[0] < (modeldates[0][1]-delta_t_obj) or datestimes[-1] > (modeldates[-1][1]+delta_t_obj):
         
         raise ValueError('EE: Fatal error. The provided files does not cover the requested time period: from {} to {}'.format(datestimes[0], datestimes[-1]))
 
-    # some fields are accumulated (eg. pr, PAR etc.). These are here read from from the files and are de-accumulated according to the previous files and the startStep parameter
+    return modeldates
+
+def ep_aladin_met(dt, modeldates, met_vars):
+    """
+    Main import module, returns list of numpy arrays corresponding to the needed met fields in met_vars for the list of datestimes (datetime class)
+        Parameters:
+            dt: datetime of the required meteo data
+            modeldates: list of available wrf model datetimes
+            met_vars: list of strings of field names
+        Returns:
+            metdata: list of ep_met_data_objects for given timestep dt
+    """
+
+    # loop over the the requested timesteps
+
+    mdt = 0
+    delta_t = ep_cfg.input_params.met.met_tolerance # in seconds
+    # loop over the requested timesteps
+    while  dt > modeldates[mdt][1]:
+        mdt += 1
+
+    if tolerance(dt,modeldates[mdt][1], delta_t = delta_t ): # tolerance in seconds
+        log.fmt_debug('II: reading {} from {} ...', dt, modeldates[mdt][0])
+        met_data = get_aladin(modeldates[mdt][0], modeldates[mdt][2], met_vars)
+    else:
+        log.fmt_debug('II: reading {} from between {} and {} ...', dt, modeldates[mdt-1][0], modeldates[mdt][0])
+        met_data1 = get_aladin(modeldates[mdt-1][0], modeldates[mdt-1][2], met_vars)
+        met_data2 = get_aladin(modeldates[mdt][0], modeldates[mdt][2], met_vars)
+        td_1 = (dt - modeldates[mdt-1][1]).seconds
+        td_2 = (modeldates[mdt][1] - dt).seconds
+        met_data = [(d1 * td_2 + d2 * td_1)/float(td_1 + td_2) for d1,d2 in zip(met_data1, met_data2)]
+
+    return met_data
+
+def ep_aladin_met_deaccumulate(met_vars, datestimes):
+    # some met_vars are accumulated (eg. pr, PAR etc.). These are here read from from the files and are de-accumulated according to the previous files and the startStep parameter
+    """
     deaccumulated = None
-    if ('pr' in fields) or ('par' in fields) or ('pr24' in fields):
-        log.debug('II: pr/par/pr24 in fields: doing de-accumulation.')
+    if ('pr' in met_vars) or ('par' in met_vars) or ('pr24' in met_vars):
+        log.debug('II: pr/par/pr24 in meteo vars: doing de-accumulation.')
         deaccumulated = {}
         infilenames = [f.name for f in grbf]
         infileindex = [pygrib.index(f, 'indicatorOfParameter', 'typeOfLevel', 'level') for f in infilenames]
         nx = grbf[0].message(1).Nx
         ny = grbf[0].message(1).Ny
         stepUnits = grbf[0].message(1).stepUnits
-        if 'pr' in fields or 'pr24' in fields:
+        if 'pr' in met_vars or 'pr24' in met_vars:
             deaccumulated['pr'] = []
-            for i,index in enumerate(infileindex):
+            for i, index in enumerate(infileindex):
                 startStep = grbf[i].message(1).startStep
-                if startStep == 0: # the first model output, everything is zero
+                if startStep == 0:  # the first model output, everything is zero
                     deaccumulated['pr'].append(np.zeros((ny, nx)))
-                else: # higher startstep means we need to substract the previous timestep
+                else:  # higher startstep means we need to substract the previous timestep
                     try:
-                        pr0 = infileindex[i-1].select(indicatorOfParameter=model_names['pr'][0],typeOfLevel=model_names['pr'][1], level=model_names['pr'][2])[0].values * model_names['pr'][3]
+                        pr0 = infileindex[i - 1].select(indicatorOfParameter=model_names['pr'][0],
+                                                        typeOfLevel=model_names['pr'][1], level=model_names['pr'][2])[
+                                  0].values * model_names['pr'][3]
                     except:
                         log.error('EE: ALADIN gribfile has gridStep > 0 and no previous file provided.')
                         raise
 
-                    pr1 = infileindex[i].select(indicatorOfParameter=model_names['pr'][0],typeOfLevel=model_names['pr'][1], level=model_names['pr'][2])[0].values * model_names['pr'][3]
-                    pr = (pr1-pr0)/(36*stepUnits) # to get the 
+                    pr1 = \
+                    infileindex[i].select(indicatorOfParameter=model_names['pr'][0], typeOfLevel=model_names['pr'][1],
+                                          level=model_names['pr'][2])[0].values * model_names['pr'][3]
+                    pr = (pr1 - pr0) / (36 * stepUnits)  # to get the
                     deaccumulated['pr'].append(pr)
-    
-        if 'par' in fields:
+
+        if 'par' in met_vars:
             deaccumulated['par'] = []
-            for i,index in enumerate(infileindex):
+            for i, index in enumerate(infileindex):
                 startStep = grbf[i].message(1).startStep
-                if startStep == 0: # the first model output, everything is zero
+                if startStep == 0:  # the first model output, everything is zero
                     deaccumulated['par'].append(np.zeros((ny, nx)))
-                else: # higher startstep means we need to substract the previous timestep
+                else:  # higher startstep means we need to substract the previous timestep
                     try:
-                        par0 = infileindex[i-1].select(indicatorOfParameter=model_names['rsds'][0],typeOfLevel=model_names['rsds'][1], level=model_names['rsds'][2])[0].values * model_names['pr'][3]
+                        par0 = infileindex[i - 1].select(indicatorOfParameter=model_names['rsds'][0],
+                                                         typeOfLevel=model_names['rsds'][1],
+                                                         level=model_names['rsds'][2])[0].values * model_names['pr'][3]
                     except:
                         log.error('EE: ALADIN gribfile has gridStep > 0 and no previous file provided.')
                         raise
 
-                    par1 = infileindex[i].select(indicatorOfParameter=model_names['rsds'][0],typeOfLevel=model_names['rsds'][1], level=model_names['rsds'][2])[0].values * model_names['rsds'][3]
-                    par = 0.5*(par1-par0)/(36*stepUnits) # 0.5 as PAR is about half of the total downward shortwave radiation
+                    par1 = infileindex[i].select(indicatorOfParameter=model_names['rsds'][0],
+                                                 typeOfLevel=model_names['rsds'][1], level=model_names['rsds'][2])[
+                               0].values * model_names['rsds'][3]
+                    par = 0.5 * (par1 - par0) / (
+                                36 * stepUnits)  # 0.5 as PAR is about half of the total downward shortwave radiation
                     deaccumulated['par'].append(par)
 
-
-                    
-                    
-            
-        
-    f = []
-    mdt = 0
-   
-
-
-    # loop over the the requested timesteps
-
-    for dt in datestimes:
-        while  dt > modeldates[mdt][1]:
-            mdt += 1
-        
-        if tolerance(dt,modeldates[mdt][1], delta_t = delta_t ): # tolerance in seconds
-            log.fmt_debug('II: reading {} from {} ...', dt, modeldates[mdt][0].name)
-
-            ncdata = get_aladin(modeldates[mdt][0], modeldates[mdt][2], fields, deaccumulated = deaccumulated, totaltstep = mdt)
-            f.append(ncdata)
-        else:
-            log.fmt_debug('II: reading {} from between {} and {} ...', dt, modeldates[mdt-1][0].filepath(), modeldates[mdt][0].filepath())
-            ncdata1 = get_aladin(modeldates[mdt-1][0], modeldates[mdt-1][2], fields, deaccumulated = deaccumulated, totaltstep = mdt)
-            ncdata2 = get_aladin(modeldates[mdt][0], modeldates[mdt][2], fields, deaccumulated = deaccumulated, totaltstep = mdt)
-            td_1 = (dt - modeldates[mdt-1][1]).seconds
-            td_2 = (modeldates[mdt][1] - dt).seconds
-            f.append([(d1 * td_2 + d2 * td_1)/float(td_1 + td_2) for d1,d2 in zip(ncdata1, ncdata2)] )
-
-
-        
-    return(f)
-
+        elif v == 'pr24':
+            data   = (deaccumulated['pr'][totaltstep]*3600*24).transpose() # kg.m-2.s-1 * 1 hour * 24
+            data_list[i] = met.ep_met_data.ep_met_data(v, data)
+    """

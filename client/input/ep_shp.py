@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -37,6 +37,9 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, proj4=None, conn=
     """ Imports shpfile into database. If the projection is not defined within the shp file it can be given either by shpsrid or proj4 string (in this priority)."""
     #global sql,sqlv
     # mapping of shp data types to postgresql types
+
+    log.debug(f'ep_shp2postgis({shpfile}, {shpcoding}, {shpsrid}, {proj4}, {conn}, {schema}, {tablename}, {tabletemp}, {tablesrid}, {geomdim}, {makevalid})')
+
     pgtype = dict({'Integer': 'integer', 'Real': 'float', 'String': 'varchar',
                    'Integer64': 'bigint', 'Date': 'date'})
     pggeomtype = dict({
@@ -185,6 +188,8 @@ def ep_shp2postgis(shpfile, shpcoding='Latin-1', shpsrid=None, proj4=None, conn=
             sqlv.append(str(shpsrid))
             if tablesrid != shpsrid:
                 sqlv.append(int(tablesrid))
+            log.tracing(sql)
+            log.tracing(sqlv)
             cur.execute(sql, sqlv)
             feature = layer.GetNextFeature()
         # create geometry index

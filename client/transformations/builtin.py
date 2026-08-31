@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -245,11 +245,12 @@ class IntersectTransformation(TwoToOneTransformation):
     Intersects input shapes with the assigned geometry sets and calculates
     the intersect coefficients.
     """
-    parameters = ['inrelation', 'inrelation2', 'outrelation', 'outsrid', 'normalize']
+    parameters = ['inrelation', 'inrelation2', 'outrelation', 'outsrid', 'scale', 'normalize']
 
-    def __init__(self, inrel1=None, inrel2=None, outrel=None, outsrid=None, normalize=True):
+    def __init__(self, inrel1=None, inrel2=None, outrel=None, outsrid=None, scale=True, normalize=True):
         super().__init__(inrel1=inrel1, inrel2=inrel2, outrel=outrel, outsrid=outsrid)
         self.has_coef = True
+        self.scale = scale
         self.normalize = normalize
 
     def __str__(self):
@@ -261,7 +262,7 @@ class IntersectTransformation(TwoToOneTransformation):
         self.outrelation.fields = list(set(self.inrelation.fields) | set(self.inrelation2.fields))
         q = cur.mogrify(
             'SELECT * FROM ep_intersection('
-            '%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s'
+            '%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s'
             ')', [self.inrelation.schema,
                   self.inrelation.name,
                   '{'+','.join([i for i in self.inrelation.fields])+'}',
@@ -273,6 +274,7 @@ class IntersectTransformation(TwoToOneTransformation):
                   self.outsrid, self.outrelation.pk,
                   self.outrelation.geom_field,
                   self.outrelation.coef,
+                  self.scale,
                   self.normalize,
                   True,  # FIXME
                   self.outrelation.temp])
@@ -314,8 +316,30 @@ class ToGridTransformation(IntersectTransformation):
     def to_center(self):
         cur = self.db_connection.cursor()
 
-        # TODO - check geometry dimmension (only dim=2 is allowed)
+        # TODO - check geometry dimension (only dim=2 is allowed)
         # connect objects to the grids by their centers
+        # for optimization, first create grid_tz with prepared centers
+        gctable = '{}_gridcenter'.format(self.outrelation.name)
+        geomgc = 'center'
+        cur.execute('DROP TABLE IF EXISTS {gcschema}.{gctable}'.format(
+            gcschema=self.case_schema, gctable=gctable))
+        sqltext = 'CREATE TABLE {gcschema}.{gctable} AS ( ' \
+                  'SELECT *, ST_Centroid({geomg}) AS {geomgc} ' \
+                  'FROM {gridschema}.{gridtable} )'.format(
+            gcschema=self.case_schema, gctable=gctable,
+            gridschema=self.inrelation2.schema, gridtable=self.inrelation2.name,
+            geomg=self.inrelation2.geom_field, geomgc=geomgc)
+        log.debug(sqltext)
+        res = cur.execute(sqltext)
+        log.sql_debug(self.db_connection)
+        # create spatial index
+        sqltext = 'CREATE INDEX {gctable}_{geomgc} ON {gcschema}.{gctable} ' \
+                  ' USING GIST ({geomgc})'.format(
+            gcschema=self.case_schema, gctable=gctable, geomgc=geomgc)
+        log.debug(sqltext)
+        res = cur.execute(sqltext)
+        log.sql_debug(self.db_connection)
+
         tgtable = '{}_togridcenter'.format(self.outrelation.name)
         cur.execute('DROP TABLE IF EXISTS {tgschema}.{tgtable}'.format(
             tgschema=self.case_schema, tgtable=tgtable))
@@ -335,13 +359,15 @@ class ToGridTransformation(IntersectTransformation):
         sqltext = 'CREATE TABLE {tgschema}.{tgtable} AS ( ' \
                   'SELECT {infields}, {gridfields}, {incoef} AS {outcoef} , g.{geomg} ' \
                   'FROM {inschema}.{intable} r ' \
-                  'join {gridschema}.{gridtable} g ' \
-                  'on st_intersects(r.{geomt}, ST_Centroid(g.{geomg})))'.format(
+                  'join {gcschema}.{gctable} g ' \
+                  'on ST_Within(g.{geomgc}, r.{geomt}))'.format(
                   tgschema=self.case_schema,tgtable=tgtable,
                   infields=infields, gridfields=gridfields, incoef=ic, outcoef=oc,
                   inschema=self.inrelation.schema, intable=self.inrelation.name,
-                  gridschema=self.inrelation2.schema, gridtable=self.inrelation2.name, geomt=self.inrelation.geom_field,
-                  geomg=self.inrelation2.geom_field)
+                  gcschema=self.inrelation2.schema, gctable=gctable,
+                  geomg=self.inrelation2.geom_field,
+                  geomt=self.inrelation.geom_field,
+                  geomgc=geomgc)
         log.debug(sqltext)
         res = cur.execute(sqltext)
         log.sql_debug(self.db_connection)
@@ -417,13 +443,14 @@ class SurrogateTransformation(OneToOneTransformation):
     """
     Applies surrogates from the assigned set of the surrogate geometry shapes.
     """
-    parameters = ['inrelation', 'surrogate_set', 'surrogate_type', 'outrelation', 'outsrid']
+    parameters = ['inrelation', 'surrogate_set', 'surrogate_type', 'scale', 'outrelation', 'outsrid']
 
-    def __init__(self, inrel=None, surset=None, surtype='limit', outrel=None, outsrid=None):
+    def __init__(self, inrel=None, surset=None, surtype='limit', scale=True, outrel=None, outsrid=None):
         super().__init__(inrel=inrel, outrel=outrel, outsrid=outsrid)
         self.has_coef = True
         self.surrogate_set = surset
         self.surrogate_type = surtype
+        self.scale = scale
 
     def __str__(self):
         return 'Surrogate: ' + str(self.inrelation) + ' # ' + str(self.surrogate_set) + ' -> ' + str(self.outrelation)
@@ -436,6 +463,8 @@ class SurrogateTransformation(OneToOneTransformation):
 
         surname = '{}_sur'.format(self.outrelation.name)
         surgeom = '{}_geom'.format(surname)
+        geomidsur = 'geom_id_sur'
+        geomid = 'geom_id'
         if self.outrelation.temp:
             outschema = ''
             outtable = '"{}"'.format(self.outrelation.name)
@@ -458,11 +487,13 @@ class SurrogateTransformation(OneToOneTransformation):
         # limit and transform surrogate set geometries
         cur.execute('DROP TABLE IF EXISTS {surtable}'.format(surtable=surtable))
         sqltext = 'CREATE {temp} TABLE {surtable} AS '\
-                  ' SELECT g.geom_id as geom_id_sur, g.gset_id as gset_id_sur, g.geom_orig_id as geom_orig_id_sur, '\
+                  ' SELECT g.{geomid} as {geomidsur}, g.gset_id as gset_id_sur, g.geom_orig_id as geom_orig_id_sur, '\
                   ' St_Transform(g.geom, %s) AS "{surgeom}", g.weight as weight_sur FROM {sources}.ep_geometry_sets s '\
                   ' JOIN {sources}.ep_in_geometries g USING(gset_id) '\
                   ' WHERE s.gset_name = %s AND ST_Intersects(St_Transform(g.geom, %s), %s::geometry)'\
-                  ' ORDER BY geom_id'.format(temp=sqltemp, surtable=surtable, surgeom=surgeom, sources=source_schema)
+                  ' ORDER BY {geomid}'\
+            .format(temp=sqltemp, surtable=surtable, geomid=geomid, geomidsur=geomidsur, \
+                    surgeom=surgeom, sources=source_schema)
         log.debug(sqltext, self.outsrid, self.surrogate_set, self.outsrid, gridenv)
         cur.execute(sqltext, (self.outsrid, self.surrogate_set, self.outsrid, gridenv, ))
         log.sql_debug(self.db_connection)
@@ -470,37 +501,61 @@ class SurrogateTransformation(OneToOneTransformation):
         sqltext = 'SELECT populate_geometry_columns(\'{}\'::regclass)'.format(surtablex)
         log.debug(sqltext)
         cur.execute(sqltext)
-        sqltext = 'create index "{}_{}" on {} using gist("{}");'.format(surname, surgeom, surtable, surgeom)
+        # create primary key and index on geom_id_sur and spatial index on geom_id_sur
+        sqltext = 'ALTER TABLE {surtable} ADD PRIMARY KEY ({geomidsur})'.format(surtable=surtable, geomidsur=geomidsur)
         log.debug(sqltext)
         cur.execute(sqltext)
-
+        sqltext = 'create index "{surname}_{surgeom}" on {surtable} using gist("{surgeom}");'\
+                  .format(surname=surname, surgeom=surgeom, surtable=surtable)
+        log.debug(sqltext)
+        cur.execute(sqltext)
         # input emission source is limitted to the surrogate areas contained in the emission source
         # intersect input geometries with surrogate geometries
         log.debug('Surrogate apply:')
-        surgeomid = 'geom_id_sur'
-        self.outrelation.fields = self.inrelation.fields[:] + [surgeomid]
+        self.outrelation.fields = self.inrelation.fields[:] + [geomidsur]
         log.debug('Surrogate outrel fields', self.outrelation.fields)
         log.debug('infields: ', self.inrelation.fields)
         ifields1 = '{' + ','.join([i for i in self.inrelation.fields]) + '}'
         log.debug('ifields1: ', ifields1)
-        ifields2 = '{' + surgeomid + '}'
+        ifields2 = '{' + geomidsur + '}'
         log.debug('ifields2: ', ifields2)
         log.debug('incoef:', self.inrelation.coef)
         log.debug('outcoef:', self.outrelation.coef)
         #
-        sqltext = 'SELECT * FROM ep_intersection(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
-        sqltext = cur.mogrify(sqltext, [outschema, self.inrelation.name,
-                  ifields1, '', #self.inrelation.coef,
-                  outschema, surname, ifields2, 'weight_sur',
-                  outschema, self.outrelation.name, self.outsrid, self.outrelation.pk,
-                  self.outrelation.geom_field, self.outrelation.coef, False, True, self.outrelation.temp])
+        sqltext = 'SELECT * FROM ep_intersection(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+        if self.surrogate_type == 'tolines':
+            # surrogate consists of lines and second table in intersect has to be polygon
+            # we replace first and second tables
+            sqltext = cur.mogrify(sqltext, [
+                      outschema, surname, ifields2, 'weight_sur',
+                      outschema, self.inrelation.name, ifields1, '', #self.inrelation.coef,
+                      outschema, self.outrelation.name, self.outsrid, self.outrelation.pk,
+                      self.outrelation.geom_field, self.outrelation.coef, self.scale, False, True, self.outrelation.temp])
+        else:
+            sqltext = cur.mogrify(sqltext, [
+                      outschema, self.inrelation.name, ifields1, '', #self.inrelation.coef,
+                      outschema, surname, ifields2, 'weight_sur',
+                      outschema, self.outrelation.name, self.outsrid, self.outrelation.pk,
+                      self.outrelation.geom_field, self.outrelation.coef, self.scale, False, True, self.outrelation.temp])
+        log.debug(sqltext)
+        cur.execute(sqltext)
+        log.sql_debug(self.db_connection)
+        # optimization - create geom_id and geomid_sur index on transaction table
+        # which significantly improve performance of the following update
+        sqltext = 'CREATE INDEX {tn}_{geomid} ON {table} ({geomid})'\
+            .format(tn=self.outrelation.name, table=outtable, geomid=geomid)
+        log.debug(sqltext)
+        cur.execute(sqltext)
+        log.sql_debug(self.db_connection)
+        sqltext = 'CREATE INDEX {tn}_{geomidsur} ON {table} ({geomidsur})'\
+            .format(tn=self.outrelation.name, table=outtable, geomidsur=geomidsur)
         log.debug(sqltext)
         cur.execute(sqltext)
         log.sql_debug(self.db_connection)
         # normalize surrogate output coefficients to original amount of emission
         sqltext = 'UPDATE {table} u SET {coef} = {coef}/(SELECT sum(s.{coef}) '\
-                  'FROM {table} s WHERE s.geom_id = u.geom_id)'\
-                  .format(coef=self.outrelation.coef, table=outtable)
+                  'FROM {table} s WHERE s.{geomid} = u.{geomid})'\
+                  .format(coef=self.outrelation.coef, table=outtable, geomid=geomid)
         log.debug(sqltext)
         cur.execute(sqltext)
         log.sql_debug(self.db_connection)
@@ -511,13 +566,14 @@ class SurrogateTransformation(OneToOneTransformation):
             else:
                 intable = '"{}"."{}"'.format(self.inrelation.schema, self.inrelation.name)
             sqltext = 'UPDATE {table2} t2 SET {coef2} = t2.{coef2}*t1.{coef1} ' \
-                      'FROM {table1} t1 WHERE t1.geom_id = t2.geom_id' \
-                      .format(table2=outtable, coef2=self.outrelation.coef, coef1=self.inrelation.coef, table1=intable)
+                      'FROM {table1} t1 WHERE t1.{geomid} = t2.{geomid}' \
+                      .format(table2=outtable, coef2=self.outrelation.coef, coef1=self.inrelation.coef, table1=intable,\
+                              geomid=geomid)
             log.debug(sqltext)
             cur.execute(sqltext)
             log.sql_debug(self.db_connection)
 
-        if self.surrogate_type == 'spread':
+        if self.surrogate_type == 'spread' or self.surrogate_type == 'tolines':
             # all input emission sources belonging to one surrogate are sumarized and spread to all this surrogate
             # -> replace source geometry with surrogate geometry
             # first get the transaction and surrogate geometry names and types
@@ -543,8 +599,8 @@ class SurrogateTransformation(OneToOneTransformation):
             log.sql_debug(self.db_connection)
             # replace source geometry with surrogate geometry
             sqltext = 'UPDATE {outtable} u SET "{outgeom}" = (SELECT s."{surgeom}" FROM {surtable} s '\
-                      ' WHERE s.geom_id_sur = u.geom_id_sur)'.format(outtable=outtable, outgeom=outgeom, surgeom=surgeom,\
-                                                                 surtable=surtable)
+                      ' WHERE s.{geomidsur} = u.{geomidsur})'\
+                .format(geomidsur=geomidsur, outtable=outtable, outgeom=outgeom, surgeom=surgeom, surtable=surtable)
             log.debug(sqltext)
             cur.execute(sqltext)
             log.sql_debug(self.db_connection)

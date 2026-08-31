@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -195,6 +195,69 @@ def ep_create_grid(schema=ep_cfg.db_connection.conf_schema, grid_name=ep_cfg.dom
         raise e
 
 
+def ep_grid_params_to_rtcfg():
+    """
+    Creates and fills ep_rtcfg parameters concerning the grid.
+    """
+    # FIXME this will assign wrong values fail in case the user changes conf but
+    #  do not run case.create_new_case
+    if ep_cfg.domain.create_grid:
+        ep_rtcfg['domain']['regular_grid'] = True
+        ep_rtcfg['domain']['nx'] = ep_cfg.domain.nx
+        ep_rtcfg['domain']['ny'] = ep_cfg.domain.ny
+        ep_rtcfg['domain']['nz'] = ep_cfg.domain.nz
+        ep_rtcfg['domain']['delx'] = ep_cfg.domain.delx
+        ep_rtcfg['domain']['dely'] = ep_cfg.domain.dely
+        ep_rtcfg['domain']['delz'] = ep_cfg.domain.delz
+        ep_rtcfg['domain']['xorg'] = ep_cfg.domain.xorg
+        ep_rtcfg['domain']['yorg'] = ep_cfg.domain.yorg
+    else:
+        cur = ep_connection.cursor()
+        # if grid not yet created - skip
+        cur.execute("SELECT EXISTS(SELECT 1 FROM pg_tables WHERE "
+                    "schemaname = %s AND tablename = %s)",
+                    (ep_cfg.db_connection.conf_schema, ep_cfg.domain.grid_name))
+        if not cur.fetchone()[0]:
+            return
+        if is_regular_grid(ep_cfg.db_connection.conf_schema, ep_cfg.domain.grid_name):
+            ep_rtcfg['domain']['regular_grid'] = True
+            cur.execute(
+                'SELECT count(distinct xmi), count(distinct ymi), '
+                'min(xmi), min(ymi), max(xma), max(yma)'
+                'FROM "{conf_schema}"."{grid_name}"'
+                .format(conf_schema=ep_cfg.db_connection.conf_schema,
+                        grid_name=ep_cfg.domain.grid_name))
+            nx, ny, xmin, ymin, xmax, ymax = cur.fetchone()
+            ep_rtcfg['domain']['nx'] = nx
+            ep_rtcfg['domain']['ny'] = ny
+            ep_rtcfg['domain']['nz'] = ep_cfg.domain.nz
+            ep_rtcfg['domain']['delx'] = (xmax - xmin) / nx
+            ep_rtcfg['domain']['dely'] = (ymax - ymin) / ny
+            ep_rtcfg['domain']['delz'] = ep_cfg.domain.delz
+            ep_rtcfg['domain']['xorg'] = xmin + (xmax - xmin) / 2
+            ep_rtcfg['domain']['yorg'] = ymin + (ymax - ymin) / 2
+        else:
+            ep_rtcfg['domain']['regular_grid'] = False
+        cur.close()
+
+
+def is_regular_grid(schema, table):
+    """
+    Check whether table is a regular grid. It assumes that columns xmi, xma,
+    ymi and yma are present with values of x/y min/max values of the element.
+    """
+    cur = ep_connection.cursor()
+    cur.execute('select count(*), count(distinct xmi), count(distinct ymi), '
+                'count(distinct xma), count(distinct yma) from "{conf_schema}"."{}"'
+                .format(table, conf_schema=schema))
+    nrow, nxmin, nymin, nxmax, nymax = cur.fetchone()
+    cur.close()
+    if nxmin == nxmax and nymin == nymax and nrow == nxmin * nymin:
+        return True
+    else:
+        return False
+
+
 def ep_dates_times():
     """ 
     Generates a list of datetime objects that correspond to congfigured
@@ -315,6 +378,8 @@ def ep_mechanism_ids(schema=None, mechanism_names=None):
         ep_rtcfg['mechanism_ids'] = []
         with ep_connection.cursor() as cur:
             for name in mechanism_names:
+                print(cur.mogrify('SELECT mech_id, type FROM "{}"."ep_mechanisms" WHERE name = %s'.format(schema), (name, )))
+                log.debug(cur.mogrify('SELECT mech_id, type FROM "{}"."ep_mechanisms" WHERE name = %s'.format(schema), (name, )))
                 cur.execute('SELECT mech_id, type FROM "{}"."ep_mechanisms" WHERE name = %s'.format(schema), (name, ))
                 try:
                     id, mech_type = cur.fetchone()
@@ -432,6 +497,8 @@ ep_rtcfg = configobj.ConfigObj()
 ep_rtcfg['db'] = dict()
 ep_rtcfg['db']['schemas_initialized'] = list()
 ep_rtcfg['run'] = dict()
+ep_rtcfg['domain'] = dict()
 ep_rtcfg['last_report_modname'] = ''
 ep_rtcfg['required_met'] = set()  # meteorological fields needed
 ep_rtcfg['required_met_in_db'] = set()  # only those met fields which are needed in db (maybe will be never used)
+ep_rtcfg['conf_prepared'] = False  # conf_prepared will be set to True in case.prepare_conf

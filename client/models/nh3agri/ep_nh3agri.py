@@ -16,15 +16,16 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
 import numpy as np
 from lib.ep_config import ep_cfg
 from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_connection, ep_create_schema
+from  met.ep_met_netcdf import read_netcdf_timestep
 from datetime import datetime, timedelta
 from netCDF4 import Dataset, num2date,date2num
 
@@ -202,7 +203,8 @@ def run_nh3agri(cfg):
     wind = np.zeros((nx,ny,numtimes),dtype=float)
     
     for t in range(len(ep_datetimes)):
-        for d in ep_rtcfg['met'][t]:
+        met_data = read_netcdf_timestep(t)
+        for d in met_data:
             if d.name == 'tas': # we need just a subset of all the meteorology
                 temp[:,:,t] = d.data[:,:,0]-273.15
             if d.name == 'wndspd10m':

@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -283,7 +283,7 @@ def ep_register_eset(eset_name, file_id, eset_info, gset_id, eset_filter, data_t
     """
 
     with ep_connection.cursor() as cur:
-        if not scenario_names[0]:
+        if not scenario_names:
             scenario_ids = None
         else:
             cur.execute('SELECT scenario_id FROM "{source_schema}"."ep_scenario_list" '
@@ -291,7 +291,7 @@ def ep_register_eset(eset_name, file_id, eset_info, gset_id, eset_filter, data_t
                     .format(source_schema=schema), (scenario_names,))
             scenario_ids = [i[0] for i in cur.fetchall()]
             
-            # check fof scenario_names not defined in senario list
+            # check for scenario_names not defined in senario list
             cur.execute('SELECT * FROM UNNEST(%(scenarios)s) '
                         'EXCEPT '
                         'SELECT scenario_name FROM "{source_schema}"."ep_scenario_list" '.
@@ -301,7 +301,7 @@ def ep_register_eset(eset_name, file_id, eset_info, gset_id, eset_filter, data_t
             if not_scenarios:
                 raise ValueError('Scenarios {} applied on eset {} are not defined.'.format(', '.join(map(str, not_scenarios)), eset_name))
 
-        if not vdist_names[0]:
+        if not vdist_names:
             vdist_ids = None
         else:
 
@@ -374,6 +374,7 @@ def ep_read_raw_sources(file_path, schema, raw_table, config):
         cur.execute(sqltext)
         # perform update table
         sqltext = 'update "{}"."{}" set {}'.format(schema, raw_table, update_term_s)
+        log.tracing(sqltext)
         cur.execute(sqltext)
         sqltext = 'update "{}"."{}" set {}'.format(schema, raw_table, update_term_g)
         cur.execute(sqltext)
@@ -454,6 +455,7 @@ def ep_process_raw_sources(con, schema, file_table, temp_view, eset_id, eset_fil
     cur.execute('SELECT scenario_id FROM "{schema}"."ep_emission_sets" WHERE eset_id=%s'.format(schema=schema), (eset_id,))
     scen_id = cur.fetchone()[0]
     log.fmt_debug('ep_process_sources: {}, {}, {}, {}, {}, {}, {}, {}, {}, {}', schema, temp_view, eset_id, scen_id, specie_input_type, specie_name, specie_val_col, category_input_type, category_name, params_col)
+    print(schema, temp_view, eset_id, scen_id, specie_input_type, specie_name, specie_val_col, category_input_type, category_name, params_col)
     cur.callproc('ep_process_sources', [schema, temp_view, eset_id, scen_id, specie_input_type, specie_name, specie_val_col, category_input_type, category_name, params_col])
     log.sql_debug(con)
 

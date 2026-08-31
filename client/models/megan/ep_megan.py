@@ -18,9 +18,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -34,6 +34,7 @@ from lib.ep_libutil import ep_dates_times, ep_projection_params, ep_rtcfg, ep_co
 import lib.ep_logging
 log = lib.ep_logging.Logger(__name__)
 from input.ep_read_sources import ep_read_raw_netcdf, ep_get_source_file_id, ep_register_source_file, ep_get_eset_id
+from  met.ep_met_netcdf import read_netcdf_timestep
 
 _required_met = [ 'soim1', 'soit1', 'tas', 'ps', 'qas', 'wndspd10m', 'pr24', 'par']
 
@@ -152,7 +153,7 @@ def preproc(cfg):
     # domain parameters
     nx = ep_cfg.domain.nx
     ny = ep_cfg.domain.ny
-    nz = ep_cfg.domain.nz
+    # nz = ep_cfg.domain.nz
 
     delx = ep_cfg.domain.delx
     dely = ep_cfg.domain.dely
@@ -571,7 +572,8 @@ def met_write_megan_met(cfg):
         megan_met_var.append(field)
 
     for t in range(len(datestimes)):
-        for d in ep_rtcfg['met'][t]:
+        met_data = read_netcdf_timestep(t)
+        for d in met_data:
             if d.name in _required_met: # we need just a subset of all the meteorology
                 iv = megan_fields.index(megan_mapping[d.name])
                 if d.name == 'soit1' or d.name == 'soim1':

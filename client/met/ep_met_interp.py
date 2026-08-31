@@ -19,9 +19,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -33,6 +33,9 @@ from lib.ep_libutil import ep_rtcfg,ep_dates_times
 import lib.ep_logging
 log = lib.ep_logging.Logger(__name__)
 from  met.ep_met_data import ep_met_data
+
+na_ = np.newaxis
+
 
 def interp_weights(xy, uv,d=2):
     tri = qhull.Delaunay(xy)
@@ -61,7 +64,6 @@ def met_interp(met_data):
 
     nx = ep_cfg.domain.nx
     ny = ep_cfg.domain.ny
-
     if  'lmet_interp' not in ep_rtcfg.keys():
         log.debug('II: ep.met.met_interp: first interpolation => calculating interpolation weights for the met and case grid')
         proj4 = ep_cfg.projection_params.projection_proj4
@@ -80,24 +82,18 @@ def met_interp(met_data):
         xorg_met = ep_cfg.input_params.met.met_xorg
         yorg_met = ep_cfg.input_params.met.met_yorg
         dx_met   = ep_cfg.input_params.met.met_dx
-        npoints_met = nx_met*ny_met
-        points_met = np.empty((nx_met * ny_met,2),dtype=float)
-        ii = 0
-        for j in range(ep_cfg.input_params.met.met_ny):
-            for i in range(ep_cfg.input_params.met.met_nx):
-                points_met[ii][0] = xorg_met+i*dx_met+dx_met/2-nx_met*dx_met/2
-                points_met[ii][1] = yorg_met+j*dx_met+dx_met/2-ny_met*dx_met/2
-                ii += 1
 
-        points_case  = np.empty((nx*ny,2),dtype=float)
+        points_met = np.empty((ny_met, nx_met, 2),dtype=float)
+        jfield_met, ifield_met = np.mgrid[0:ny_met,0:nx_met]
+        points_met[:,:,0] = xorg_met+ifield_met*dx_met+dx_met/2-nx_met*dx_met/2
+        points_met[:,:,1] = yorg_met+jfield_met*dx_met+dx_met/2-ny_met*dx_met/2
 
-        ii = 0
-        for j in range(ny):
-            for i in range(nx):
-                points_case[ii][0], points_case[ii][1] = pyproj.transform(case_proj, met_proj, xorg+i*delx+delx/2-nx*delx/2, yorg+j*dely+dely/2-ny*dely/2)
-                ii += 1
+        points_case  = np.empty((ny,nx,2),dtype=float)
+        jfield_case, ifield_case = np.mgrid[0:ny,0:nx]
+        points_case[:,:,0], points_case[:,:,1] = pyproj.transform(case_proj, met_proj,
+           xorg+ifield_case*delx+delx/2-nx*delx/2, yorg+jfield_case*dely+dely/2-ny*dely/2)
 
-        vtx, wts = interp_weights(points_met, points_case)
+        vtx, wts = interp_weights(points_met.reshape((nx_met*ny_met,2)), points_case.reshape((nx*ny,2)))
         ep_rtcfg['lmet_interp'] = 1
         ep_rtcfg['met_interp_vtx'] = vtx
         ep_rtcfg['met_interp_wts'] = wts
@@ -111,7 +107,7 @@ def met_interp(met_data):
         l3d = (len(d.data.shape) == 3)
         if not l3d:
             values = (d.data[:,:]).flatten(order='F')
-            log.fmt_debug('II: ep_met.ep_interp: regridding for {}.', d.name)
+            log.fmt_tracing('II: ep_met.ep_interp: regridding for {}.', d.name)
             if ep_cfg.input_params.met.met_type in ['WRF', 'ALADIN']:            
                 data_i = (interpolate(values, vtx, wts)).reshape((nx, ny), order = 'F')
             else:
@@ -122,7 +118,7 @@ def met_interp(met_data):
             data_i_3d = np.empty((nx, ny, nzz), dtype=float)
             for i in range(nzz):
                 values = d.data[:,:,i].flatten(order='F')
-                log.fmt_debug('II: ep_met.ep_interp: regridding for {}.', d.name)
+                log.fmt_tracing('II: ep_met.ep_interp: regridding for {}.', d.name)
                 data_i = interpolate(values, vtx, wts)
                 if ep_cfg.input_params.met.met_type in ['WRF', 'ALADIN'] :
                     data_i_3d[:,:,i] = data_i.reshape((nx, ny), order = 'F')
@@ -132,3 +128,52 @@ def met_interp(met_data):
             met_data_i.append(ep_met_data(d.name, data_i_3d))
 
     return(met_data_i)
+
+
+def met_create_vinterp(ztarget, zsource):
+    '''Creates vertical interpolator.
+    Accepts 1D or 3D ztarget and zsource (at least 1 must be 3D).
+    Extrapolates below zsource, but not above.
+    '''
+
+    # Broadcast source and target arrays
+    if len(ztarget.shape) == 1:
+        nzt = ztarget.shape[-1]
+        zs = zsource
+        nx, ny, nzs = zs.shape
+        zt = np.broadcast_to(ztarget[na_,na_,:], (nx, ny, nzt))
+    elif len(zsource.shape) == 1:
+        nzs = zsource.shape[-1]
+        zt = ztarget
+        nx, ny, nzt = zt.shape
+        zs = np.broadcast_to(zsource[na_,na_,:], (nx, ny, nzs))
+    else:
+        zs = zsource
+        zt = ztarget
+        nx, ny, nzs = zsource.shape
+        nzt = ztarget.shape[-1]
+        assert (ny, nx) == ztarget.shape[:-1]
+
+    # Find indices of target z-levels within source
+    idx1 = np.zeros((nx, ny, nzt), dtype='i4')
+    for i in range(nx):
+        for j in range(ny):
+            idx1[i,j,:] = np.searchsorted(zs[i,j,:], zt[i,j,:], 'left')
+    below = (idx1 == 0) # extrapolation below
+    idx0 = idx1 - 1
+    idx0[below] = 0
+
+    # Find weights for interpolation
+    ogx, ogy, ogz = np.ogrid[0:nx, 0:ny, 0:nzt]
+    zs0 = zs[ogx,ogy,idx0]
+    zsd = zs[ogx,ogy,idx1] - zs0
+    zsd[below] = 1.
+    w = (zt - zs0) / zsd
+    w[below] = 0.
+
+    # Vertical interpolation routine. Argument: 3D variable data
+    def vinterp(var):
+        v0 = var[ogx,ogy,idx0]
+        return v0 + w*(var[ogx,ogy,idx1]-v0)
+
+    return vinterp

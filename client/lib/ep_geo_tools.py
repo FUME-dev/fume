@@ -16,15 +16,14 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
 import numpy as np
 import pyproj
-from pygrib import open as gribopen
 from netCDF4 import Dataset
 import lib.ep_io_fortran as fio
 from osgeo import osr, ogr
@@ -64,7 +63,7 @@ def get_projection_params(srs):
             XCENT = 0.
         else:
             srs_proj = srs.GetAttrValue("PROJECTION")
-    
+            print(srs_proj) 
             if srs_proj == "Lambert_Conformal_Conic_2SP": # lcc
                 proj = 'LAMBERT'
                 p_alp = srs.GetProjParm("standard_parallel_1")
@@ -114,6 +113,15 @@ def get_projection_params(srs):
                 p_alp = YCENT
                 p_bet = XCENT
                 p_gam = XCENT
+            else:
+                proj = 'OTHER'
+                XCENT = 0.
+                YCENT = 0.
+                p_alp = 0.
+                p_bet = 0.
+                p_gam = 0.
+
+                
             
         return(proj, XCENT, YCENT, p_alp, p_bet, p_gam)
 
@@ -149,6 +157,7 @@ def get_projection_domain_params(ifilename, ftype='MCIP', endian='big'):
         elif ftype == 'CAMx':
             ifile = open(ifilename, mode='rb')
         elif ftype == 'ALADIN':
+            from pygrib import open as gribopen
             ifile = gribopen(ifilename)
         else:
             log.error('EE: Unknown file format in get_projection_domain:', ftype)

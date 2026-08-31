@@ -17,11 +17,17 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
-from .dispatch import prepare_conf, create_new_case, process_point_sources, collect_meteorology, process_case_spec_time, preproc_external_models, run_external_models, process_vertical_distributions
-__all__ = ['prepare_conf', 'create_new_case', 'process_point_sources', 'collect_meteorology', 'process_case_spec_time', 'process_vertical_distributions', 'preproc_external_models', 'run_external_models']
+from .dispatch import prepare_conf, create_new_case, process_point_sources, collect_meteorology, process_case_speciation_factors, process_case_time_factors, preproc_external_models, run_external_models, process_vertical_distributions
+
+__all__ = ['prepare_conf', 'create_new_case', 'process_point_sources', 'collect_meteorology', 'process_case_speciation_factors', 'process_case_time_factors', 'process_vertical_distributions', 'preproc_external_models', 'run_external_models']
+
+
+# Make sure to run prepare_conf if it was not specified in the workflow
+
+prepare_conf()

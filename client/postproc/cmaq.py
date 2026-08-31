@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -107,9 +107,9 @@ class CMAQAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         self.outfile.FTYPE = np.int32(1)
         self.outfile.EXEC_ID = '????????????????'
         self.outfile.NTHIK = np.int32(1)
-        self.outfile.NCOLS = np.int32(self.cfg.domain.nx)
-        self.outfile.NROWS = np.int32(self.cfg.domain.ny)
-        self.outfile.NLAYS = np.int32(self.cfg.domain.nz)
+        self.outfile.NCOLS = np.int32(self.rt_cfg['domain']['nx'])
+        self.outfile.NROWS = np.int32(self.rt_cfg['domain']['ny'])
+        self.outfile.NLAYS = np.int32(self.rt_cfg['domain']['nz'])
         self.outfile.NVARS = np.int32(len(self.species))
         start_date, start_time = cmaq_date_time(self.rt_cfg['run']['datestimes'][0])
         cur_date, cur_time = cmaq_date_time(datetime.now())
@@ -129,12 +129,12 @@ class CMAQAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         self.outfile.P_GAM = np.float64(self.rt_cfg['projection_params']['p_gam'])
         self.outfile.XCENT = np.float64(self.rt_cfg['projection_params']['lon_central'])
         self.outfile.YCENT = np.float64(self.rt_cfg['projection_params']['lat_central'])
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
         self.outfile.XORIG = np.float64(xorig)
         self.outfile.YORIG = np.float64(yorig)
-        self.outfile.XCELL = np.float64(self.cfg.domain.delx)
-        self.outfile.YCELL = np.float64(self.cfg.domain.dely)
+        self.outfile.XCELL = np.float64(self.rt_cfg['domain']['delx'])
+        self.outfile.YCELL = np.float64(self.rt_cfg['domain']['dely'])
         self.outfile.GDNAM = self.cfg.domain.grid_name
         self.outfile.UPNAM = '???'
         self.outfile.HISTORY = '???'
@@ -184,12 +184,12 @@ class CMAQWriter(DataReceiver):
         self.outfile.P_GAM = np.float64(self.rt_cfg['projection_params']['p_gam'])
         self.outfile.XCENT = np.float64(self.rt_cfg['projection_params']['lon_central'])
         self.outfile.YCENT = np.float64(self.rt_cfg['projection_params']['lat_central'])
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
         self.outfile.XORIG = np.float64(xorig)
         self.outfile.YORIG = np.float64(yorig)
-        self.outfile.XCELL = np.float64(self.cfg.domain.delx)
-        self.outfile.YCELL = np.float64(self.cfg.domain.dely)
+        self.outfile.XCELL = np.float64(self.rt_cfg['domain']['delx'])
+        self.outfile.YCELL = np.float64(self.rt_cfg['domain']['dely'])
         self.outfile.GDNAM = self.cfg.domain.grid_name
         self.outfile.UPNAM = '???'
         self.outfile.HISTORY = '???'
@@ -207,9 +207,9 @@ class CMAQAreaWriter(CMAQWriter):
     def setup(self):
         super().setup(self.cfg.postproc.cmaqareawriter.outfile)
 
-        self.outfile.createDimension('LAY', self.cfg.domain.nz)
-        self.outfile.createDimension('ROW', self.cfg.domain.ny)
-        self.outfile.createDimension('COL', self.cfg.domain.nx)
+        self.outfile.createDimension('LAY', self.rt_cfg['domain']['nz'])
+        self.outfile.createDimension('ROW', self.rt_cfg['domain']['ny'])
+        self.outfile.createDimension('COL', self.rt_cfg['domain']['nx'])
         self.outvars = []
 
     def receive_area_emiss(self, timestep, data):
@@ -238,9 +238,9 @@ class CMAQAreaWriter(CMAQWriter):
 
     def finalize(self):
         self.outfile.NTHIK = np.int32(1)
-        self.outfile.NCOLS = np.int32(self.cfg.domain.nx)
-        self.outfile.NROWS = np.int32(self.cfg.domain.ny)
-        self.outfile.NLAYS = np.int32(self.cfg.domain.nz)
+        self.outfile.NCOLS = np.int32(self.rt_cfg['domain']['nx'])
+        self.outfile.NROWS = np.int32(self.rt_cfg['domain']['ny'])
+        self.outfile.NLAYS = np.int32(self.rt_cfg['domain']['nz'])
         self.outfile.NVARS = np.int32(len(self.species))
         setattr(self.outfile, 'VAR-LIST', ''.join([long_object_name(spec[1])
                                                    for spec in self.species]))
@@ -284,7 +284,7 @@ class CMAQPointWriter(CMAQWriter):
         # We need to wait till here to make sure we know all dimensions
 
         if not ('VAR' in self.outfile.dimensions.keys()):
-            self.outfile.createDimension('VAR', len(self.species))
+            self.outfile.createDimension('VAR', len(self.pspecies))
 
         #if len(self.outvars) == 0:
         if not ('TFLAG' in self.outfile.variables.keys()):
@@ -293,7 +293,7 @@ class CMAQPointWriter(CMAQWriter):
             self.timevar.long_name = 'FLAG           '
             self.timevar.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
 
-        for specid, specname in self.species:
+        for specid, specname in self.pspecies:
             if not (specname in self.outfile.variables.keys()):
                 emisvar = self.outfile.createVariable(specname, 'f4', ('TSTEP', 'LAY', 'ROW', 'COL'))
                 emisvar.long_name = long_object_name(specname)
@@ -308,7 +308,7 @@ class CMAQPointWriter(CMAQWriter):
         self.timevarstk[timestep,:,0] = date
         self.timevarstk[timestep,:,0] = time
 
-        for i, spec1 in enumerate(self.species):
+        for i, spec1 in enumerate(self.pspecies):
             self.outvars[i][timestep,0,:,0] = data[:,i]
 
     def receive_stack_params(self, stacks):
@@ -328,8 +328,8 @@ class CMAQPointWriter(CMAQWriter):
         var_int =      ['ISTACK', 'STKCNT', 'ROW', 'COL', 'LMAJOR', 'LPING']
         var_int_units =['none', 'none', 'none', 'none', 'none',  'none']
         stkintvars = []
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
 
         for var in var_int:
             stkvar = self.outfilestk.createVariable(var, 'i4', ('TSTEP', 'LAY', 'ROW', 'COL'))
@@ -340,8 +340,8 @@ class CMAQPointWriter(CMAQWriter):
         
         stkintvars[0][:,0,:,0] = np.array([self.stacks_id] * numtimes)
         stkintvars[1][:,0,:,0] = np.array([range(0, self.numstk)] * numtimes)
-        stkintvars[2][:,0,:,0] = np.array([ ((self.point_src_params[:,2]-xorig)/self.cfg.domain.delx).astype('int') + 1] * numtimes)
-        stkintvars[3][:,0,:,0] = np.array([ ((self.point_src_params[:,4]-yorig)/self.cfg.domain.dely).astype('int') + 1] * numtimes)
+        stkintvars[2][:,0,:,0] = np.array([ ((self.point_src_params[:,2]-xorig)/self.rt_cfg['domain']['delx']).astype('int') + 1] * numtimes)
+        stkintvars[3][:,0,:,0] = np.array([ ((self.point_src_params[:,4]-yorig)/self.rt_cfg['domain']['dely']).astype('int') + 1] * numtimes)
         stkintvars[4][:,0,:,0] = np.zeros((numtimes,self.numstk),dtype=int)
         stkintvars[5][:,0,:,0] = np.zeros((numtimes,self.numstk),dtype=int)
 
@@ -387,17 +387,17 @@ class CMAQPointWriter(CMAQWriter):
         var_joined = ''.join([long_object_name(var) for var in var_int + var_float ] )
         setattr(self.outfilestk,'VAR-LIST', var_joined)
 
-    def receive_point_species(self, species):
-        self.species = species
+    def receive_point_species(self, pspecies):
+        self.pspecies = pspecies
 
     def finalize(self):
         self.outfile.NTHIK = np.int32(1)
-        self.outfile.NCOLS = np.int32(self.cfg.domain.nx)
-        self.outfile.NROWS = np.int32(self.cfg.domain.ny)
-        self.outfile.NLAYS = np.int32(self.cfg.domain.nz)
-        self.outfile.NVARS = np.int32(len(self.species))
+        self.outfile.NCOLS = np.int32(self.rt_cfg['domain']['nx'])
+        self.outfile.NROWS = np.int32(self.rt_cfg['domain']['ny'])
+        self.outfile.NLAYS = np.int32(self.rt_cfg['domain']['nz'])
+        self.outfile.NVARS = np.int32(len(self.pspecies))
         setattr(self.outfile, 'VAR-LIST', ''.join([long_object_name(spec[1])
-                                                   for spec in self.species]))
+                                                   for spec in self.pspecies]))
         self.outfile.FILEDESC='CMAQ point emissions'
 
 
@@ -429,15 +429,108 @@ class CMAQPointWriter(CMAQWriter):
         self.outfilestk.P_GAM = np.float64(self.rt_cfg['projection_params']['p_gam'])
         self.outfilestk.XCENT = np.float64(self.rt_cfg['projection_params']['lon_central'])
         self.outfilestk.YCENT = np.float64(self.rt_cfg['projection_params']['lat_central'])
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
         self.outfilestk.XORIG = np.float64(xorig)
         self.outfilestk.YORIG = np.float64(yorig)
-        self.outfilestk.XCELL = np.float64(self.cfg.domain.delx)
-        self.outfilestk.YCELL = np.float64(self.cfg.domain.dely)
+        self.outfilestk.XCELL = np.float64(self.rt_cfg['domain']['delx'])
+        self.outfilestk.YCELL = np.float64(self.rt_cfg['domain']['dely'])
         self.outfilestk.GDNAM = self.cfg.domain.grid_name
         self.outfilestk.UPNAM = '???'
         self.outfilestk.HISTORY = '???'
         self.outfilestk.close()
 
         super().finalize()
+
+
+class CMAQ3DTimeWriter(CMAQWriter):
+    """
+    Postprocessor class for writing CMAQ emissions (area and point) in 3D emission file.
+    Point emission can be processed by the meteorological plumerise.
+    This output is needed for CMAQ version <= 4.7.1
+    *Time-optimized version: time disaggregation performed with NetCDF
+    files. Requires a prior run of NetCDFTotalAreaWriter!*
+    """
+
+    def setup(self):
+        """
+        Run NetCDF setup with CMAQ-specific overrides:
+        Dimensions names are x=COL, Y=ROW, Z=LAY, T=TSTEP
+        Do not let the parent class create a time variable,
+        projection attributes and close the file during finalize.
+        """
+        super().setup(filename=self.cfg.postproc.cmaqareawriter.outfile,
+                      no_create_t_var=True, no_create_projection_attrs=True,
+                      create_v_dim=True, v_dim='VAR',
+                      x_dim='COL', y_dim='ROW', z_dim='LAY', t_dim='TSTEP',
+                      no_close_outfile=True)
+
+        self.outfile.createDimension('DATE-TIME', 2)
+
+    def finalize(self):
+        """
+        Finalization steps
+        ------------------
+
+         - create the CMAQ-specific time variable TFLAG
+         - run parent finalize (save output data and generic NetCDF attributes)
+         - save time data
+         - change the long_name attribute of output variables to CMAQ format
+         - save CMAQ-specific attributes
+         - close the file
+
+        """
+        self.timevar = self.outfile.createVariable('TFLAG', 'i4', ('TSTEP', 'VAR', 'DATE-TIME'))
+        self.timevar.units = '<YYYYDDD,HHMMSS>'
+        self.timevar.long_name = 'FLAG           '
+        self.timevar.var_desc = 'Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS                                '
+
+        super().finalize()
+
+        for timestep, datetime in enumerate(self.rt_cfg['run']['datestimes']):
+            date, time = cmaq_date_time(datetime)
+            self.timevar[timestep,:,0] = date
+            self.timevar[timestep,:,1] = time
+
+        for outvar in self.outvars:
+            outvar.long_name = long_object_name(outvar.long_name)
+
+        setattr(self.outfile, 'VAR-LIST', ''.join([long_object_name(spec[1])
+                                                   for spec in self.species]))
+        self.outfile.FILEDESC='CMAQ area emissions created by FUME ' + self.cfg.run_params.output_params.output_description
+        self.outfile.FTYPE = np.int32(1)
+        self.outfile.EXEC_ID = '????????????????'
+        self.outfile.NTHIK = np.int32(1)
+        self.outfile.NCOLS = np.int32(self.rt_cfg['domain']['nx'])
+        self.outfile.NROWS = np.int32(self.rt_cfg['domain']['ny'])
+        self.outfile.NLAYS = np.int32(self.rt_cfg['domain']['nz'])
+        self.outfile.NVARS = np.int32(len(self.species))
+        start_date, start_time = cmaq_date_time(self.rt_cfg['run']['datestimes'][0])
+        cur_date, cur_time = cmaq_date_time(datetime.now())
+        self.outfile.SDATE = np.int32(start_date)
+        self.outfile.STIME = np.int32(start_time)
+        self.outfile.CDATE = np.int32(cur_date)
+        self.outfile.CTIME = np.int32(cur_time)
+        self.outfile.WDATE = np.int32(cur_date)
+        self.outfile.WTIME = np.int32(cur_time)
+        self.outfile.TSTEP = np.int32(self.cfg.run_params.time_params.timestep/3600*10000)
+        self.outfile.GDTYP = np.int32(gdtyp_mapping[self.rt_cfg['projection_params']['proj']])
+        self.outfile.VGTYP = np.int32(self.cfg.postproc.cmaqareawriter.vgtyp)
+        self.outfile.VGTOP = np.float32(self.cfg.postproc.cmaqareawriter.vgtop)
+        self.outfile.VGLVLS = np.float32(self.cfg.postproc.cmaqareawriter.vglvls)
+        self.outfile.P_ALP = np.float64(self.rt_cfg['projection_params']['p_alp'])
+        self.outfile.P_BET = np.float64(self.rt_cfg['projection_params']['p_bet'])
+        self.outfile.P_GAM = np.float64(self.rt_cfg['projection_params']['p_gam'])
+        self.outfile.XCENT = np.float64(self.rt_cfg['projection_params']['lon_central'])
+        self.outfile.YCENT = np.float64(self.rt_cfg['projection_params']['lat_central'])
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
+        self.outfile.XORIG = np.float64(xorig)
+        self.outfile.YORIG = np.float64(yorig)
+        self.outfile.XCELL = np.float64(self.rt_cfg['domain']['delx'])
+        self.outfile.YCELL = np.float64(self.rt_cfg['domain']['dely'])
+        self.outfile.GDNAM = self.cfg.domain.grid_name
+        self.outfile.UPNAM = '???'
+        self.outfile.HISTORY = '???'
+
+        self.outfile.close()

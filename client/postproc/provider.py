@@ -18,31 +18,37 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
 from abc import ABCMeta
 from collections import defaultdict
 import lib.ep_logging
+
 log = lib.ep_logging.Logger(__name__)
+
 
 def pack(name):
     """
     Decorator for the DataProvider classes registers given method as a pack
     hook.
     """
+
     def f_wrap(f):
         def f_wrapped(*args, **kwargs):
             return f(*args, **kwargs)
 
         f_wrapped._pack = name
         return f_wrapped
+
     return f_wrap
 
+
 pack_hooks = {}
+
 
 class DataProviderMeta(ABCMeta):
     """
@@ -50,6 +56,7 @@ class DataProviderMeta(ABCMeta):
     a _pack attribute and save that function as a pack hook in the 'pack_hooks' database.
     Each pack can have one hook.
     """
+
     def __new__(cls, name, bases, dct):
         inst = super().__new__(cls, name, bases, dct)
         rank = 0
@@ -115,7 +122,7 @@ class DataProvider(metaclass=DataProviderMeta):
         met = pack_hooks[pack]
         met_obj = getattr(self, met['name'])
         if met['ran']:
-            log.debug('*** Pack', pack,'already ran, skipping...')
+            log.debug('*** Pack', pack, 'already ran, skipping...')
             return
 
         if len(self.receivers[pack]) > 0:

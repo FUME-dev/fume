@@ -17,13 +17,14 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
 import numpy as np
+from math import sqrt
 
 p0 = 1000.
 gamma = 0.286
@@ -64,27 +65,32 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
     dstk = max(dstk,0.1)
     vstk = max(vstk,0.1)
 
-    dtdz = np.zeros(nlay+1)
+    dtdz = np.zeros(nlay)
 # Calculate potential temperature lapse rate
-    for k in range(1, nlay):
-        if ( k < nlay ):
-            dz = hght[k+1]/2.
-            if ( k > 1 ):
+    for k in range(0, nlay-1):
+        if ( k < nlay-1 ):
+            if ( k == 0):
+                dz = hght[k+1]/2.
+            else:
                 dz = (hght[k+1] -  hght[k-1])/2.
             dtheta = temp[k+1]*(p0/press[k+1])**gamma - temp[k]*(p0/press[k])**gamma
             dtdz[k] = dtheta/dz
         else:
             dtdz[k] = dtdz[k-1]
+# Test if dtdz is not zero
+    for k in range(nlay-2, -1, -1):
+        if dtdz[k] == 0:
+            dtdz[k] = dtdz[k+1]
 
 # Find beginning layer; determine vertical coordinates relative
 #     to stack-top 
 
-    kstk = nlay
-    for k in range(1, nlay-1):
+    kstk = nlay-1
+    for k in range(0, nlay-1):
         if (hstk < hght[k]):
             kstk = k # we found the model layer corresponding to the stack
             break
-    if kstk == nlay: # the stack taller than the model highest level
+    if kstk == nlay-1: # the stack taller than the model highest level
         prise = hstk
         return prise
     
@@ -103,7 +109,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
         elif (wind[kstk] >= vstk/1.5 and wind[kstk] < vstk):
             dwfact = 3.*(vstk - wind[kstk])/vstk
 #minimum windspeed profile: 1 m/s
-    for k  in range(1,nlay):
+    for k  in range(0,nlay-1):
         wind[k] = max(wind[k],1.)
 
 # Neutral-unstable conditions for momentum rise and stack buoyancy flux
@@ -111,11 +117,11 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
     umrise = 3.*dstk*vstk/wind[kstk]
     if (umrise > ztop):
         wsum = wind[kstk]*ztop
-        for k in range(kstk+1,nlay):
+        for k in range(kstk+1,nlay-1):
             wsum = wsum + wind[k]*(hght[k] - hght[k-1])
             wavg = wsum/(hght[k] - hstk)
             umrise = 3.*dstk*vstk/wavg
-            if (umrise < ght[k]-hstk):
+            if (umrise < hght[k]-hstk):
                 break
         
     bflux0 = grav*vstk*dstk*dstk*(stkt - temp[kstk])/(4.*stkt)
@@ -126,7 +132,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
     while True:  
         if (lfirst):
             kstab = kstk
-            if (kstk > 1 and hstk < ((hght[kstk]+hght[kstk-1])/2.)):
+            if (kstk > 0 and hstk < ((hght[kstk]+hght[kstk-1])/2.)):
                 kstab = kstk - 1
         else:
             kstab = kstk-1
@@ -163,11 +169,12 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
                 rflux = 0.0055*(rise - ztop)*wind[kstk]**3 /(1. + hstk/(rise - ztop))**(2./3.)
       
             kstk = kstk + 1
-            if (kstk > nlay or rflux <= 0.):
+            if (kstk > nlay-1 or rflux <= 0.):
                 prise = hstk + dwfact*rise 
                 return prise
 
             lfirst = False
+            continue
 
 # Stable buoyancy rise
 
@@ -185,7 +192,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
                 wsum = wind[kstk]*ztop
                 tsum = temp[kstk]*ztop
                 ssum = dtdz[kstab]*ztop
-                for k in range(kstk+1,nlay):
+                for k in range(kstk+1,nlay-1):
                     wsum = wsum + wind[k]*(hght[k] - hght[k-1])
                     wavg = wsum/(hght[k] - hstk)
                     tsum = tsum + temp[k]*(hght[k] - hght[k-1])
@@ -199,7 +206,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
 
 # Find maximum between stable momentum and (2/3)*bouyancy rise
 
-            if (smrise < (2.*sbrise/3.)):
+            if (smrise > (2.*sbrise/3.)):
                 rise = smrise
                 prise = hstk + dwfact*rise
                 return prise
@@ -219,7 +226,7 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
             rflux = bflux - 0.24*dtdz[kstab]*bflux0**(1./3.)/temp[kstk]* (ztop**(8./3.) - zbot**(8./3.))
 
         kstk = kstk + 1
-        if (kstk > nlay or rflux <= 0.):
+        if (kstk > nlay-1 or rflux <= 0.):
             rise = zstab + 2.*(sbrise - zstab)/3.
             prise = hstk + dwfact*rise
             return prise
@@ -231,25 +238,25 @@ def plumerise(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
     return prise
 
 
-def get_plume_frac(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
-    """
-    Calculate the fraction of emission each layer receives.
-    """
-    pfrac = np.zeros(nlay+1,dtype = np.float )
-    prise = plumerise(nlay,hght,temp,press,wind,hstk,dstk,tstk,vstk,zstk)
-    k = 1
-    layerfound = False
-    if (hght[nlay] <= zstk):
-        kstk = nlay
-        zstk = hght[kstk-1] + 1.
-        layerfound = True
+def get_plume_frac(nlay,hght,temp,press,wind,hstk,dstk,tstk,vstk):
+    """Calculate the fraction of emission each layer receives.
 
-    while (k <= nlay and layerfound == False):
-        if (hght(k) > zstk):
+    Return (k0, [frac_k0, frac_k1, ..., frac_kn])
+    """
+    cq1, cq2 = 0.4, 3.0
+    zstk = plumerise(nlay,hght,temp,press,wind,hstk,dstk,tstk,vstk)
+    layerfound = False
+    if (hght[nlay-1] <= zstk):
+        kstk = nlay-1
+        zstk = hght[kstk-1]
+        layerfound = True
+    k = 0
+    while (k < nlay-1 and layerfound == False):
+        if (hght[k] >= zstk):
+            kstk = k
             layerfound = True
         else:
-            k =+ 1
-    kstk = k            
+            k += 1
     
     wp = max(1.,vstk/2.)
     tp = (temp[kstk] + tstk)/2.
@@ -263,22 +270,31 @@ def get_plume_frac(nlay, hght,temp,press,wind,hstk,dstk,tstk,vstk):
     pwidth = 3.*sqrt(pwidth*pwidth + 2.*rkp*trise)
     pwidth = max(1.,min(pwidth,zrise))
     zbot = max(0.,zstk - pwidth/2.)
-    ztop = min(hght[nlay],zstk + pwidth/2.)
+    ztop = min(hght[nlay-1],zstk + pwidth/2.)
 
 # Calculate layers to receive emissions
 
     pwidth = ztop - zbot
 
+    # for easier calculation of the pfrac extend hght array with zero and adjust kstk
+    hght = np.r_[[0],hght]
+    kstk += 1
     kt = nlay
     for kt in range(kstk,nlay):
         if (hght[kt] >= ztop):
             break
-    for kb in range(1,kstk):
-        if  (hght[kb] > zbot):    
+    kb = 0
+    for kb in range(0,kstk+1):
+        if  (hght[kb] > zbot):
+            kb -= 1
             break
-    for k in  range(kb,kt):
-        bot = max(hght[k-1],zbot)
-        top = min(hght[k],ztop)
-        pfrac[k] = (top - bot)/pwidth
 
-    return pfrac
+    hght_stk = hght[kb:kt+1].copy()
+    hght_stk[0] = max(hght_stk[0], zbot)
+    hght_stk[-1] = min(hght_stk[-1], ztop)
+    pfrac = hght_stk[1:] - hght_stk[:-1]
+
+    # normalize pfrac
+    pfrac /= pfrac.sum()
+
+    return kb, pfrac

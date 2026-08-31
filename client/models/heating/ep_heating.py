@@ -26,9 +26,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -41,7 +41,10 @@ from netCDF4 import Dataset, date2num
 from  met.ep_met_netcdf import write_netcdf
 from models.heating.met_interp import interp_weights, interpolate, met_interp
 from  met.ep_met_data import ep_met_data
-
+from  met.ep_met_netcdf import read_netcdf_timestep
+import lib.ep_logging
+log = lib.ep_logging.Logger(__name__)
+#from models.heating.array2netcdf import array2netcdf
 _required_met = [ 'tas']
 
 
@@ -71,18 +74,18 @@ def get_annual(cfg, dim=2):
         temp = np.array(lines,dtype=float)
     return(temp)
 
-
-def get_temp(cfg, dim=2):
-    """ This reads the temperature field for the given day as a single value or a 2D array"""
-    if dim == 2:
-        ncf_t = Dataset(cfg.metfile, 'r')
-        temp = ncf_t.variables[cfg.tname][:].squeeze()
-        temp = temp.transpose(1,0)        
-    else:
-        f_t = open(cfg.tfile,'r')
-        lines = f_t.readlines()
-        temp = lines[0]
-    return(temp)
+################### unused ###################
+#def get_temp(cfg, dim=2):
+#    """ This reads the temperature field for the given day as a single value or a 2D array"""
+#    if dim == 2:
+#        ncf_t = Dataset(cfg.metfile, 'r')
+#        temp = ncf_t.variables[cfg.tname][:].squeeze()
+#        temp = temp.transpose(1,0)        
+#    else:
+#        f_t = open(cfg.tfile,'r')
+#        lines = f_t.readlines()
+#        temp = lines[0]
+#    return(temp)
     
 
 def preproc(cfg):
@@ -121,7 +124,6 @@ def preproc(cfg):
         actual_date = grb2dt(grbf1).date()
 
         grbf1.close()
-
         for f in filelist:
             grbf = pygrib.open(f) 
 
@@ -148,7 +150,7 @@ def preproc(cfg):
         daildata = np.zeros((cfg.met_nx,cfg.met_ny), dtype=float)
         dailymeans = []
         dcount = 0
-
+        dc = 0
         times_tmp = ncf1.variables['Times'][:]
         ntimes = times_tmp.shape[0]
         numchars = times_tmp.shape[1]
@@ -170,20 +172,24 @@ def preproc(cfg):
                     dcount += 1
                 else:
                     dailymeans.append(daildata/dcount)
+                    dc += 1
                     daildata = data
                     actual_date = dt
                     dcount = 1
         dailymeans = np.array(dailymeans)
         numdays = dailymeans.shape[0]
-
     suma = np.zeros((cfg.met_nx, cfg.met_ny), dtype=float)
+    t_func_daily = np.zeros((numdays, cfg.met_nx, cfg.met_ny), dtype=float)
     for i in range(cfg.met_nx):
         for j in range(cfg.met_ny):
             for d in range(numdays):
                 suma[i,j] += t_func(dailymeans[d,i,j], cfg.td0,cfg.tdin)
+                t_func_daily[d,i,j] = t_func(dailymeans[d,i,j], cfg.td0,cfg.tdin)
 
     data = ep_met_data('sum', suma)
+
     write_netcdf([[data]], [ep_datetimes[0]], 'sum_orig.nc')
+    #array2netcdf(t_func_daily, 'tfunc_daily.nc')
 
     if cfg.met_interp:
         suma =  met_interp(data, cfg).data
@@ -221,42 +227,42 @@ def run(cfg, ext_mod_id):
                     '"{case_schema}".ep_mod_spec_factors_all sf '
                     'JOIN '
                     '"{case_schema}".ep_out_species ms ON ms.spec_id = sf.spec_mod_id '
-                    'WHERE cat_id IN %s ORDER BY spec_id;', case_schema=case_schema)
+                    'WHERE cat_id/1000000=%s/1000000 ORDER BY spec_id;', case_schema=case_schema)
 
         cur.execute(q, (tuple([int(c) for c in cat_heat]),))
         heat_species = np.array(cur.fetchall())
-        
         species = list(heat_species[:,1])
+        log.debug('II: Species list from annual heating emissions: {}'.format(' '.join(species)))
         spec_ids = list(heat_species[:,0])
         numspec = heat_species.shape[0]
         # get the annual heating emissions sum
         heat_emission = np.zeros((nx,ny,numspec), dtype=float) 
-        q = str.format('SELECT tz.i, tz.j, spec_id, SUM({houryear}*emis.emiss) '
+        q = str.format('SELECT tz.i, tz.j, spec_id, SUM(emis.emiss) '
                     'FROM "{case_schema}".ep_sg_emissions_spec emis '
                     'JOIN "{case_schema}".ep_sources_grid USING(sg_id) '
                     'JOIN "{case_schema}".ep_grid_tz tz   USING(grid_id) '
-                    'WHERE emis.cat_id IN %s GROUP BY tz.i, tz.j, spec_id;', houryear=houryear, case_schema=case_schema)
+                    'WHERE emis.cat_id/1000000=%s/1000000 GROUP BY tz.i, tz.j, spec_id;', case_schema=case_schema)
         cur.execute(q, (tuple([int(c) for c in cat_heat]),))
         for row in cur.fetchall():
-            heat_emission[row[0]-1, row[1]-1,spec_ids.index(str(row[2]))-1] = row[3]
-
+            heat_emission[row[0]-1, row[1]-1,spec_ids.index(str(row[2]))] += row[3]
     #2) get the actual temperatures
     temp = np.empty((nx, ny, numtimes))
     for t in range(numtimes):
-        for d in ep_rtcfg['met'][t]:
+        met_data = read_netcdf_timestep(t)
+        for d in met_data:
             if d.name == 'tas': # we need just a subset of all the meteorology
                 temp[..., t] =  d.data
 
+    # it is assumed that the fume timesteps cover exactly one day
     td = t_func(np.mean(temp,axis = 2),  cfg.td0,cfg.tdin)
 
 
-    #3) get the daily heating emissions from annual ones
+    #3) get the daily heating emissions from annual ones based on the actual daily temp
     ncf = Dataset(path.join(cfg.workdir, cfg.metfile_tempsum),'r')
     suma = ncf.variables['sum'][0,:,:].transpose(1,0)
     
     for s in range(numspec):
-        heat_emission[:,:,s] = heat_emission[:,:,s]/suma*td
-
+        heat_emission[:,:,s] = heat_emission[:,:,s]/(suma/365.25)*td
     #4) calculate actual heating emissions for the FUME timesteps
     # get the timezone information for each of the gridboxes
     # TODO - need to revise work with time zones and time shifts!!! Current state is messy here
@@ -272,16 +278,17 @@ def run(cfg, ext_mod_id):
     
     heatem = np.zeros((nx,ny,numtimes,numspec),dtype=float) 
     # apply timezone offsets
-    # TODO - need to revise work with time zones and time shifts!!! Current state is messy here
     for t,dt in enumerate(ep_datetimes):
         hour = dt.hour
         for i in range(nx):
             for j in range(ny):
                nh = (hour + tz_offset[i,j]) % 24
-               heatem[i,j,t,:] = heat_emission[i,j,:] * float(cfg.profile[nh])/24.0
+               heatem[i,j,t,:] = heat_emission[i,j,:] * float(cfg.profile[nh])
                
     if cfg.write_emis:
-        ncfo = Dataset(path.join(cfg.workdir, cfg.output),'w',format='NETCDF3_CLASSIC')
+        outfile = path.join(cfg.workdir, cfg.output)
+        log.debug('II: Writing heating emissions to file: {}'.format(outfile))
+        ncfo = Dataset(outfile,'w',format='NETCDF3_CLASSIC')
         ncfo.createDimension('time',numtimes)
         ncfo.createDimension('ny',ny)
         ncfo.createDimension('nx',nx)

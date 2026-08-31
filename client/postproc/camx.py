@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -153,13 +153,13 @@ class CAMxAreaWriterBase(CAMxWriter):
         YCENT = self.rt_cfg['projection_params']['lat_central']
 
         # domain parameters
-        nx = self.cfg.domain.nx
-        ny = self.cfg.domain.ny
-        nz = self.cfg.domain.nz
-        delx = self.cfg.domain.delx
-        dely = self.cfg.domain.dely
-        xorg = self.cfg.domain.xorg
-        yorg = self.cfg.domain.yorg
+        nx = self.rt_cfg['domain']['nx']
+        ny = self.rt_cfg['domain']['ny']
+        nz = self.rt_cfg['domain']['nz']
+        delx = self.rt_cfg['domain']['delx']
+        dely = self.rt_cfg['domain']['dely']
+        xorg = self.rt_cfg['domain']['xorg']
+        yorg = self.rt_cfg['domain']['yorg']
         # the S/W corner of the grid (as gridboxes)
         xorig = xorg - nx*delx/2.0
         yorig = yorg - ny*dely/2.0
@@ -217,7 +217,7 @@ class CAMxAreaTimeWriter(CAMxAreaWriterBase):
                             self.bdate[time_idx+1], self.btime[time_idx+1])
 
             for spec_idx, (specid, specname) in enumerate(self.species):
-                fmt_str = 'i40s'+str(self.cfg.domain.nx*self.cfg.domain.ny)+'f'
+                fmt_str = 'i40s'+str(self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['ny'])+'f'
                 # Create a data placeholder with the data from the first
                 # category, then sum for the rest of the categories.
                 # In CAMx, we do not have elevated emissions (3D emissions),
@@ -251,7 +251,7 @@ class CAMxAreaWriter(CAMxAreaWriterBase):
                         self.bdate[timestep+1], self.btime[timestep+1])
 
         for i in range(self.numspec):
-            fmt_str = 'i40s'+str(self.cfg.domain.nx*self.cfg.domain.ny)+'f'
+            fmt_str = 'i40s'+str(self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['ny'])+'f'
             # in CAMx, we do not have elevated emissions (3D emissions),
             # so sum up to the ground
             emis2d = np.sum(data, axis=2)
@@ -310,13 +310,13 @@ class CAMxPointWriter(CAMxWriter):
         p_bet = self.rt_cfg['projection_params']['p_bet']
         XCENT = self.rt_cfg['projection_params']['lon_central']
         YCENT = self.rt_cfg['projection_params']['lat_central']
-        nx = self.cfg.domain.nx
-        ny = self.cfg.domain.ny
-        nz = self.cfg.domain.nz
-        delx = self.cfg.domain.delx
-        dely = self.cfg.domain.dely
-        xorg = self.cfg.domain.xorg
-        yorg = self.cfg.domain.yorg
+        nx = self.rt_cfg['domain']['nx']
+        ny = self.rt_cfg['domain']['ny']
+        nz = self.rt_cfg['domain']['nz']
+        delx = self.rt_cfg['domain']['delx']
+        dely = self.rt_cfg['domain']['dely']
+        xorg = self.rt_cfg['domain']['xorg']
+        yorg = self.rt_cfg['domain']['yorg']
         # the S/W corner of the grid (as gridboxes)
         xorig = xorg - nx*delx/2.0
         yorig = yorg - ny*dely/2.0
@@ -487,15 +487,15 @@ class CAMxNetCDFAreaTimeWriter(NetCDFAreaTimeDisaggregator):
 
         # save the coordinate variables
 
-        nx = self.cfg.domain.nx
-        ny = self.cfg.domain.ny
-        nz = self.cfg.domain.nz
+        nx = self.rt_cfg['domain']['nx']
+        ny = self.rt_cfg['domain']['ny']
+        nz = self.rt_cfg['domain']['nz']
 
-        xorg = self.cfg.domain.xorg
-        yorg = self.cfg.domain.yorg
+        xorg = self.rt_cfg['domain']['xorg']
+        yorg = self.rt_cfg['domain']['yorg']
 
-        delx = self.cfg.domain.delx
-        dely = self.cfg.domain.dely
+        delx = self.rt_cfg['domain']['delx']
+        dely = self.rt_cfg['domain']['dely']
 
 
         xorig = xorg - nx*delx/2.0
@@ -610,9 +610,9 @@ class CAMxAreaTimeWriterFromTotalFile(CAMxWriter):
         category_id_name = 'category_id'
         category_name_name = 'category_name'
         time_shift_name = 'ts_id'
+        z_name = 'z'
 
-
-        _ignorevars = [time_shift_name, category_id_name, category_name_name]
+        _ignorevars = [time_shift_name, category_id_name, category_name_name, z_name]
         self.infile = Dataset(self.cfg.postproc.netcdfareawriter.totalfile)
 
         # get the list of categories from netcdf
@@ -649,13 +649,13 @@ class CAMxAreaTimeWriterFromTotalFile(CAMxWriter):
         YCENT = self.rt_cfg['projection_params']['lat_central']
 
         # domain parameters
-        nx = self.cfg.domain.nx
-        ny = self.cfg.domain.ny
-        nz = self.cfg.domain.nz
-        delx = self.cfg.domain.delx
-        dely = self.cfg.domain.dely
-        xorg = self.cfg.domain.xorg
-        yorg = self.cfg.domain.yorg
+        nx = self.rt_cfg['domain']['nx']
+        ny = self.rt_cfg['domain']['ny']
+        nz = self.rt_cfg['domain']['nz']
+        delx = self.rt_cfg['domain']['delx']
+        dely = self.rt_cfg['domain']['dely']
+        xorg = self.rt_cfg['domain']['xorg']
+        yorg = self.rt_cfg['domain']['yorg']
         # the S/W corner of the grid (as gridboxes)
         xorig = xorg - nx*delx/2.0
         yorig = yorg - ny*dely/2.0
@@ -687,11 +687,12 @@ class CAMxAreaTimeWriterFromTotalFile(CAMxWriter):
                             self.bdate[time_idx+1], self.btime[time_idx+1])
 
             for spec_idx, specname in enumerate(species):
-                fmt_str = 'i40s'+str(self.cfg.domain.nx*self.cfg.domain.ny)+'f'
+                fmt_str = 'i40s'+str(self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['ny'])+'f'
                 # Create a data placeholder with the data from the first
                 # category, then sum for the rest of the categories.
                 # In CAMx, we do not have elevated emissions (3D emissions),
                 # so sum up the vertical column too
+
                 data = np.zeros(self.infile.variables[specname][0][0].shape, dtype='f')
                 for ts_id in self.ts:
                     ts_idx = self.ts_lookup[ts_id]
@@ -745,10 +746,11 @@ class CAMxPointTimeWriterFromTotalFile(CAMxWriter):
         category_id_name = 'category_id'
         category_name_name = 'category_name'
         time_shift_name = 'ts_id'
+        z_name = 'z'
         stack_param_names_int = ['ISTACK', 'STKCNT', 'ROW', 'COL', 'LMAJOR', 'LPING']
         stack_param_names_float = ['LATITUDE', 'LONGITUDE', 'STKDM', 'STKHT', 'STKTK', 'STKVE', 'STKFLW', 'XLOCA', 'YLOCA']
 
-        _ignorevars = [time_shift_name, category_id_name, category_name_name] + stack_param_names_int + stack_param_names_float
+        _ignorevars = [time_shift_name, category_id_name, category_name_name, z_name] + stack_param_names_int + stack_param_names_float
         self.infile = Dataset(self.cfg.postproc.netcdfpointwriter.totalfile)
 
         # get the list of categories from netcdf
@@ -796,13 +798,13 @@ class CAMxPointTimeWriterFromTotalFile(CAMxWriter):
         YCENT = self.rt_cfg['projection_params']['lat_central']
 
         # domain parameters
-        nx = self.cfg.domain.nx
-        ny = self.cfg.domain.ny
-        nz = self.cfg.domain.nz
-        delx = self.cfg.domain.delx
-        dely = self.cfg.domain.dely
-        xorg = self.cfg.domain.xorg
-        yorg = self.cfg.domain.yorg
+        nx = self.rt_cfg['domain']['nx']
+        ny = self.rt_cfg['domain']['ny']
+        nz = self.rt_cfg['domain']['nz']
+        delx = self.rt_cfg['domain']['delx']
+        dely = self.rt_cfg['domain']['dely']
+        xorg = self.rt_cfg['domain']['xorg']
+        yorg = self.rt_cfg['domain']['yorg']
         # the S/W corner of the grid (as gridboxes)
         xorig = xorg - nx*delx/2.0
         yorig = yorg - ny*dely/2.0
@@ -852,7 +854,7 @@ class CAMxPointTimeWriterFromTotalFile(CAMxWriter):
             mt.write_record(self.outfile, endian, fmt_str, *var_list)
 
             for spec_idx, specname in enumerate(species):
-                fmt_str = 'i40s'+str(self.cfg.domain.nx*self.cfg.domain.ny)+'f'
+                fmt_str = 'i40s'+str(self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['ny'])+'f'
                 # Create a data placeholder with the data from the first
                 # category, then sum for the rest of the categories.
                 # In CAMx, we do not have elevated emissions (3D emissions),

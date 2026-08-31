@@ -1192,6 +1192,7 @@ Emission output in various forms is implemented as a postprocessing
 module (\verb|postproc|). Postprocessing routines can perform:
 \begin{itemize}
 \item output for specific AQ model(s)
+\item shp file suitable for GIS softwares
 \item graphical output
 \end{itemize}
 
@@ -1296,6 +1297,25 @@ The first class creates the 2D emission PALM input with the level of detail two 
         data_content='PALM emission created by FUME emission model'
 \end{verbatim}
 
+SHP file output is provided by classes: 
+\begin{itemize}
+\item
+  \verb|shp.SHPAreaWriter|
+\item
+  \verb|shp.SHPPointWriter|
+\end{itemize}
+The first class creates polygon shp output with area and line emissions before time dissagregation in mol/s (g/s) as average year emission. The second class creates point shp output with point sources.  An example of the postprocessing section in the FUME configuration for SHP output is:
+
+\begin{verbatim}
+[postproc]
+    processors = postproc.shp.SHPAreaWriter, postproc.shp.SHPPointWriter
+    
+    [[shpwriter]]
+      outfile_area = area.shp
+      outfile_point = point.shp
+\end{verbatim}
+
+
 
 Two simple plotter processors are built in:
 
@@ -1329,4 +1349,3 @@ This turns on the report of type \verb|RECORD| for the whole FUME run except the
 
 
 \end{document}
-

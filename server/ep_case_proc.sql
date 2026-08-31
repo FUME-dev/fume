@@ -15,9 +15,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 */
 
@@ -145,7 +145,9 @@ BEGIN
                                 JOIN %I.ep_time_var_values USING(tv_id)
                                 WHERE resolution = 3 AND period = $2 OR resolution = 2 AND period = $3 OR
                                       resolution = 1 AND period = $4 OR resolution = 4 AND period = $5
-                                GROUP BY cat_id', case_schema, case_schema, conf_schema, conf_schema)
+                                GROUP BY cat_id
+                            ON CONFLICT ON CONSTRAINT ep_time_factors_pkey DO UPDATE
+                                SET tv_factor=excluded.tv_factor', case_schema, case_schema, conf_schema, conf_schema)
                  USING time_cur, month, dow, hour, year;
     END LOOP;
 
@@ -174,7 +176,7 @@ BEGIN
     -- calculate split factors from speciation compound profiles
     execute format('TRUNCATE %I.ep_sp_factors RESTART IDENTITY CASCADE',case_schema);
     execute format('INSERT INTO %I.ep_sp_factors (cat_id, spec_in_id, spec_sp_id, split_factor, mol_weight)
-					SELECT cat_id, spec_in_id, ma.spec_sp_id, sum((react_fact*fraction)/(mol_weight)), sum(fraction*mol_weight) AS split_factor
+					SELECT cat_id, spec_in_id, ma.spec_sp_id, sum((react_fact*fraction)/(mol_weight)) AS split_factor, sum(fraction*mol_weight)
 					FROM %I.ep_comp_cat_profiles
 					JOIN %I.ep_chem_compounds USING(chem_comp_id)
 					JOIN (SELECT * FROM %I.ep_comp_mechanisms_assignment WHERE mech_id = ANY (%L)) AS ma USING(chem_comp_id)
@@ -182,7 +184,7 @@ BEGIN
 
     -- add split factors from gspro files
     execute format('INSERT INTO %I.ep_sp_factors (cat_id, spec_in_id, spec_sp_id, split_factor, mol_weight)
-                SELECT cat_id, spec_in_id, spec_sp_id, mole_split_factor/mol_weight, mol_weight as split_factor
+                SELECT cat_id, spec_in_id, spec_sp_id, mole_split_factor/mol_weight as split_factor, mol_weight
                 FROM %I.ep_gspro_sp_factors WHERE mech_id = ANY (%L)',
                 case_schema, conf_schema, mech_ids);
     -- recompile statistics

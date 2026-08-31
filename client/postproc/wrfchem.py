@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -56,8 +56,8 @@ class WRFCHEMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         projection attributes and close the file during finalize.
         """
 #       mole/(km*km)/hr. The units of all aerosol species are microgram/(m*m)/s
-        gas_coef = 3600.0/(self.cfg.domain.delx*self.cfg.domain.dely)
-        aer_coef =    1.0/(self.cfg.domain.delx*self.cfg.domain.dely)
+        gas_coef = 3600.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely'])
+        aer_coef =    1.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely'])
         ##################################################################
         gases = ['NO2', 'NO'] # fill explicitly the gaseous species in WRF (without the 'E' prefix)
         aero = ['PEC', 'POA'] # same for aerosols 
@@ -76,9 +76,9 @@ class WRFCHEMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
                       no_close_outfile=True, scale_factor = units_conversion)
 
         self.strdim = self.outfile.createDimension('DateStrLen', 19)
-        self.outfile.createDimension(self.names['x_dim'],self.cfg.domain.nx)
-        self.outfile.createDimension(self.names['y_dim'],self.cfg.domain.ny)
-        self.outfile.createDimension(self.names['z_dim'],self.cfg.domain.nz)
+        self.outfile.createDimension(self.names['x_dim'],self.rt_cfg['domain']['nx'])
+        self.outfile.createDimension(self.names['y_dim'],self.rt_cfg['domain']['ny'])
+        self.outfile.createDimension(self.names['z_dim'],self.rt_cfg['domain']['nz'])
         self.timevar = self.outfile.createVariable('Times', 'c', ('Time', 'DateStrLen'))
 
 
@@ -150,8 +150,8 @@ class WRFCHEM3DTimeWriter(NetCDF3DTimeDisaggregator):
         projection attributes and close the file during finalize.
         """
 #       mole/(km*km)/hr. The units of all aerosol species are microgram/(m*m)/s
-        gas_coef = 3600.0/(self.cfg.domain.delx*self.cfg.domain.dely)
-        aer_coef =    1.0/(self.cfg.domain.delx*self.cfg.domain.dely)
+        gas_coef = 3600.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely'])
+        aer_coef =    1.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely'])
         ##################################################################
         gases = ['NO2', 'NO'] # fill explicitly the gaseous species in WRF (without the 'E' prefix)
         aero = ['PEC', 'POA'] # same for aerosols 
@@ -170,9 +170,9 @@ class WRFCHEM3DTimeWriter(NetCDF3DTimeDisaggregator):
                       no_close_outfile=True, scale_factor = units_conversion)
 
         self.outfile.createDimension('DateStrLen', 19)
-        self.outfile.createDimension(self.names['x_dim'],self.cfg.domain.nx)
-        self.outfile.createDimension(self.names['y_dim'],self.cfg.domain.ny)
-        self.outfile.createDimension(self.names['z_dim'],self.cfg.domain.nz)
+        self.outfile.createDimension(self.names['x_dim'],self.rt_cfg['domain']['nx'])
+        self.outfile.createDimension(self.names['y_dim'],self.rt_cfg['domain']['ny'])
+        self.outfile.createDimension(self.names['z_dim'],self.rt_cfg['domain']['nz'])
         self.timevar = self.outfile.createVariable('Times', 'c', ('Time', 'DateStrLen'))
 
     def finalize(self):

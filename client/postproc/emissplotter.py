@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -84,8 +84,8 @@ class EmissPlot():
                             resolution=self.cfg.postproc.emissplotter.basemap_resolution,
                             lat_0=pp['lat_central'], lon_0=pp['lon_central'],
                             lat_1=pp['p_alp'], lat_2=pp['p_bet'],
-                            width=self.cfg.domain.nx*self.cfg.domain.delx,
-                            height=self.cfg.domain.ny*self.cfg.domain.dely)
+                            width=self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx'],
+                            height=self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely'])
 
             self.plotter = m
             m.drawcoastlines()
@@ -95,8 +95,8 @@ class EmissPlot():
             self.grid_x = self.grid_x+m.projparams['x_0']
             self.grid_y = self.grid_y+m.projparams['y_0']
         else:
-            self.grid_x = np.arange(self.cfg.domain.nx+1)
-            self.grid_y = np.arange(self.cfg.domain.ny+1)
+            self.grid_x = np.arange(self.rt_cfg['domain']['nx']+1)
+            self.grid_y = np.arange(self.rt_cfg['domain']['ny']+1)
             self.plotter = plt
 
         try:

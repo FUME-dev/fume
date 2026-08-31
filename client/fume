@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2025 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2025 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2025 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -83,11 +83,8 @@ ep_cfg.db_connection.all_schemas = {
 if ep_cfg.db_connection.password != '':
     connection_info['password'] = ep_cfg.db_connection.password
 
-ep_getconnection(ep_cfg.db_connection.database, connection_info)
 
-if ep_cfg.debug:
-    # check the db connection
-    from lib.ep_libutil import ep_connection
+ep_getconnection(ep_cfg.db_connection.database, connection_info)
 
 # Initialize reporting
 import lib.ep_reporting

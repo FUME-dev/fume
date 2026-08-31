@@ -18,19 +18,27 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
 import math
 import numpy as np
-from netCDF4 import Dataset, date2num
-from postproc.receiver import DataReceiver, requires
+from collections import namedtuple
+from netCDF4 import Dataset
+from met.ep_plumerise import get_plume_frac
+from  met.ep_met_netcdf import read_netcdf_timestep
+from postproc.receiver import requires
 from postproc.netcdf import NetCDFAreaTimeDisaggregator, NetCDFTotalWriter
+from postproc.dissolving import dissolve, DissolvingOrder
+from lib.ep_config import ep_cfg
+from lib.ep_libutil import ep_rtcfg
 import lib.ep_logging
 log = lib.ep_logging.Logger(__name__)
+
+na_ = np.newaxis
 
 class PalmTotalAreaWriter(NetCDFTotalWriter):
     """
@@ -109,12 +117,14 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         kwargs['no_create_spec_vars'] = True
         kwargs['no_create_v_dim'] = True
         kwargs['v_dim'] = 'nspecies'
+        kwargs['no_create_z_dim'] = True
         kwargs['no_close_outfile'] =  True
         super().setup(*args, **kwargs)
+        # z dimension has to be present but is always 1
+        self.outfile.createDimension(self.names['z_dim'], 1)
         # PALM needs eission flows per m2, emission values are per grid
         # calculate conversion coefficient (1/gred_area)
-        self.norm_coef = 1.0/(self.cfg.domain.delx*self.cfg.domain.dely)
-
+        self.norm_coef = 1.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely'])
         self.nchars_specname = 25
 
         # add E_UTM and N_UTM !!!
@@ -131,14 +141,16 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
         self.create_2d_emiss_file_struct()
 
+    '''
     def receive_point_species(self, pspecies):
         self.pspecies = pspecies
 
     def receive_point_categories(self, pcategories):
         self.pcategories = pcategories
+        self.pcategories_lookup = {member[0]: idx for idx, member in enumerate(self.pcategories)}
 
     @requires('categories','species','point_species','point_categories','time_shifts', 'molar_weight')
-    def receive_point_emiss_ij(self, timestep, data):
+    def receive_point_emiss_ij(self, timestep, cat_id, data):
         """
          - process point sources to gridded emission_values variable
            (PALM does not have implemented point sources so far)
@@ -153,20 +165,21 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         log.debug('Time step point sources', timestep, time.replace(tzinfo=None))
         for pspec_idx, (spec_id, specname) in enumerate(self.pspecies):
             spec_idx = self.species_lookup[spec_id]
-            for pcat_idx, (cat_id, catname) in enumerate(self.pcategories):
-                # time shifts
-                for ts_id in self.ts:
-                    dtutc = self.time_shifts[(ts_id, time)]
-                    tf = self.time_factors[dtutc]
-                    try:
-                        time_factor = float(tf[cat_id])
-                    except KeyError:
-                        continue
-                    # write emisssion flux
-                    # gas phase species needs to convert to weight units from molar for PALM!
-                    # palm needs flux per m2 - normalize by 1/grid_area
-                    self.emisvar[timestep, 0, :, :, spec_idx] += pemis[:, :, pcat_idx, pspec_idx] * time_factor * \
-                                                                 self.molar_weight[(cat_id,spec_id)] * self.norm_coef
+            pcat_idx = self.pcategories_lookup[cat_id]
+            # time shifts
+            for ts_id in self.ts:
+                dtutc = self.time_shifts[(ts_id, time)]
+                tf = self.time_factors[dtutc]
+                try:
+                    time_factor = float(tf[cat_id])
+                except KeyError:
+                    continue
+                # write emisssion flux
+                # gas phase species needs to convert to weight units from molar for PALM!
+                # palm needs flux per m2 - normalize by 1/grid_area
+                self.emisvar[timestep, 0, :, :, spec_idx] += pemis[:, :, pcat_idx, pspec_idx] * time_factor * \
+                                                             self.molar_weight[(cat_id,spec_id)] * self.norm_coef
+    '''
 
     def finalize(self):
         """
@@ -177,6 +190,7 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         """
         log.debug('Fill out 2D area emission')
         # calculate and fill out temporarily disaggregated emission
+        # for 2D emission (level=-1, level dimension in total file = 0)
         self.infile = Dataset(self.cfg.postproc.palmwriter.totalfile, "r")
 
         for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
@@ -185,6 +199,12 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
                 for ts_id in self.ts:
                     ts_idx = self.ts_lookup[ts_id]
                     for cat_idx, (catid, catname) in enumerate(self.categories):
+                        try:
+                            self.molar_weight[(catid, specid)]
+                        except:
+                            # combination cat and specie does not have emission source
+                            # e.g. it does not have speciation in gspro
+                            continue
                         dtutc = self.time_shifts[(ts_id, stepdt)]
                         tf = self.time_factors[dtutc]
                         try:
@@ -245,12 +265,14 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
         self.emisvar.long_name = 'emission values'
         self.emisvar.standard_name = 'emission_values'
         self.emisvar.coordinates = "E_UTM N_UTM lon lat"
-        self.emisvar[:] = 0.0
+        # initialize by zero by individual timestes due to memory limits
+        for it in range(len(self.rt_cfg['run']['datestimes'])):
+            self.emisvar[it,:,:,:,:] = 0.0
 
         # Fill netcdf attributes according PIDS
         self.outfile.Conventions = "CF-1.7"
-        self.outfile.origin_x = self.cfg.domain.xorg - self.cfg.domain.nx * self.cfg.domain.delx / 2.0
-        self.outfile.origin_y = self.cfg.domain.yorg - self.cfg.domain.ny * self.cfg.domain.dely / 2.0
+        self.outfile.origin_x = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx'] * self.rt_cfg['domain']['delx'] / 2.0
+        self.outfile.origin_y = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny'] * self.rt_cfg['domain']['dely'] / 2.0
         #self.outfile.origin_z =
         # calculate lon,lat of the left bottom corner of the domain for output
         # IT DOES NOT WORK ON ARIEL (is it necessary?)
@@ -278,6 +300,78 @@ class PALMAreaTimeWriter(NetCDFAreaTimeDisaggregator):
 
 ##########################################################
 
+PointVsrcEmis = namedtuple('PointVsrcEmis', 'i j level spec_id cat_id ts_id height diameter '
+        'temperature velocity emiss')
+
+class VsrcMap:
+    """Class for mapping between z,y,x coordinates and ivsrc for volume sources"""
+
+    def __init__(self, i, j, k, datavars):
+        self.nvsrc = 0
+        self.xvar = i
+        self.yvar = j
+        self.zvar = k
+        self.datavars = datavars
+
+        # Prepare indexing
+        self._vsrc_new_indices = []
+        self._map = {}
+
+    def _get(self, key):
+        """Finds item from map or inserts a new key in one operation.
+
+        Processing newly added records is postponed.
+        """
+        v = self._map.setdefault(key, self.nvsrc)
+        if v == self.nvsrc:
+            self._vsrc_new_indices.append(key)
+            self.nvsrc += 1
+        return v
+
+    def assign_by_yxmask(self, yxmask, z):
+        """Finds assignment indices for vsrc in 2D, expanding nvsrc where necessary."""
+
+        assign_indices = [self._get((z[y,x],y,x))
+                for y,x in np.argwhere(yxmask)]
+        if self._vsrc_new_indices:
+            self._process_new_coords()
+
+        return np.array(assign_indices, dtype=int)
+
+    def assign_by_zyxmask(self, zbase, ybase, xbase, zyxmask):
+        """Finds assignment indices for vsrc in 3D, expanding nvsrc where necessary."""
+
+        assign_indices = [self._get((zbase+z,ybase+y,xbase+x))
+                for z,y,x in np.argwhere(zyxmask)]
+        if self._vsrc_new_indices:
+            self._process_new_coords()
+
+        return np.array(assign_indices, dtype=int)
+
+    def __getitem__(self, key):
+        ivsrc = self._get(key)
+        if self._vsrc_new_indices:
+            self._process_new_coords()
+
+        return ivsrc
+
+    def _process_new_coords(self):
+        """Fills variable values for newly created coords"""
+
+        nnew = len(self._vsrc_new_indices)
+        log.fmt_debug('Added {} new vsrc coordinates.', nnew)
+
+        # Assign z, y, x coordinate variables
+        ifrom = self.nvsrc - nnew
+        zc, yc, xc = zip(*self._vsrc_new_indices)
+        self.zvar[ifrom:self.nvsrc] = zc
+        self.yvar[ifrom:self.nvsrc] = yc
+        self.xvar[ifrom:self.nvsrc] = xc
+        self._vsrc_new_indices[:] = []
+
+        # Add zeros to data variables
+        for dv in self.datavars:
+            dv[:, ifrom:self.nvsrc] = 0.
 
 class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
     """
@@ -285,6 +379,10 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
     Time-optimized version: time disaggregation performed with NetCDF
     files. Requires a prior run of PalmTotalAreaWriter!*
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.point_vsrc_emiss = []
 
     def setup(self, *args, **kwargs):
         """
@@ -310,100 +408,52 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
         kwargs['v_dim'] = 'nspecies'
         kwargs['no_close_outfile'] =  True
         super().setup(*args, **kwargs)
+
         # PALM needs emission volume flows per m3, emission values are per grid
         # calculate conversion coefficient (1/grid_volume)
-        self.norm_coef = 1.0/(self.cfg.domain.delx*self.cfg.domain.dely*self.cfg.domain.delz)
+        self.norm_coef = 1.0/(self.rt_cfg['domain']['delx']*self.rt_cfg['domain']['dely']*self.cfg.domain.delz)
+
+        # VSRC time writer needs detailed information from PALM static driver
+        self.read_static_driver()
 
         self.nchars_specname = 64
 
         # FIXME: add E_UTM and N_UTM !!!
 
-    def receive_molar_weight(self, molar_weight):
-        self.molar_weight = molar_weight
+        # In case of dissolving, check if meteorology is available
+        if ep_cfg.postproc.palmwriter.plumerise:
+            if 'met_ts_mapping' not in ep_rtcfg:
+                log.error('Plumerise requires meteorology - enable case.collect_meteorology in the workflow!')
+                raise ValueError
 
-    def receive_emission_levels(self, levels):
-        self.levels = levels
+        # Load dissolving order from config
+        if ep_cfg.postproc.palmwriter.dissolving.area:
+            self.dissolve_area = DissolvingOrder(ep_cfg.postproc.palmwriter.dissolving.area_order)
+        else:
+            self.dissolve_area = None
 
-    @requires('categories')
-    def receive_species(self, species):
-        self.species = species
-        self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
+        if ep_cfg.postproc.palmwriter.dissolving.point:
+            self.dissolve_point = DissolvingOrder(ep_cfg.postproc.palmwriter.dissolving.point_order)
+        else:
+            self.dissolve_point = None
 
-    @requires('categories', 'species','molar_weight')
-    def receive_number_volume_sources(self, nvsrc):
-        '''
-        recieves number of volume sources from provider
-        and creates volume sources netcdf structure (dimension, variables)
-        '''
-        self.nvsrc = nvsrc
-        log.debug('nvsrc:', nvsrc)
-        if nvsrc > 0:
-            # create basic structure of vsrc file
-            self.create_vsrc_emiss_file_struct()
-
-            # create netcdf dimensions and variables for 3d volume sources
-            default_index = -1   # ijk index
-            default_value = 0.0  # volume source value
-
-            self.outfile.createDimension('nvsrc', self.nvsrc)
-            self.vsrc_i = self.outfile.createVariable('vsrc_i', 'i4', ('nvsrc',), fill_value=default_index)
-            self.vsrc_j = self.outfile.createVariable('vsrc_j', 'i4', ('nvsrc',), fill_value=default_index)
-            self.vsrc_k = self.outfile.createVariable('vsrc_k', 'i4', ('nvsrc',), fill_value=default_index)
-            self.vsrc_value = [None] * len(self.species_lookup)
-            for ispec in range(len(self.species_lookup)):
-                log.debug('species[ispec]', ispec, self.species[ispec])
-                vname = 'vsrc_' + self.species[ispec][1]
-                log.debug('createVariable: ' + vname)
-                self.vsrc_value[ispec] = self.outfile.createVariable(vname, 'f4', (self.names['t_dim'], 'nvsrc', ), \
-                                                                     fill_value=float(self.cfg.postproc.palmwriter.undef))
-                self.vsrc_value[ispec].missing_value = float(self.cfg.postproc.palmwriter.undef)
-                self.vsrc_value[ispec].lod = 2
-                if self.molar_weight[0, self.species[ispec][0]] == 1: ## HACK
-                    # PM
-                    self.vsrc_value[ispec].units = 'kg/m3/s'
-                else:
-                    # gas
-                    self.vsrc_value[ispec].units = 'mol/m3/s'
-                self.vsrc_value[ispec].long_name = 'volume emission values ' + self.species[ispec][1]
-                self.vsrc_value[ispec].standard_name = vname
-                self.vsrc_value[ispec][:] = 0.0
-                log.debug('Variable ' + vname + ' created')
-
-    @requires('categories', 'species', 'emission_levels', 'number_volume_sources')
-    def receive_point_vsrc_by_species_category_and_level(self, data):
+    def read_static_driver(self):
+        # check existence of the b3d to avoid to run method multiple time
         try:
-            self.point_vsrc_emiss
+            self.b3d
+            return
         except:
-            log.debug('Create list point_vsrc_emiss')
-            self.point_vsrc_emiss = []
-        # receive point_vsrc_emiss
-        log.debug('Receive point_vsrc_emiss rows')
-        for row in data:
-            # i, j, level, spec_id, cat_id, ts_id, height, emiss
-            self.point_vsrc_emiss.append([row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]])
-
-
-    def finalize(self):
-        """
-        Finalization steps
-        ------------------
-         - write temporary disagregated vsrc emission from total file
-         - write vsrc point emission
-         - close the file
-        """
-
-        # if number of vsrc > 0, write emisssion flux for lower levels (level>0)
-        # emission into 3d palm emiss structure
-        if self.nvsrc > 0:
-            # calculate and fill out temporarily disaggregated emission
-            # open total file
-            self.infile = Dataset(self.cfg.postproc.palmwriter.totalfile, "r")
-            # open necessary palm static driver to obtain the vertical structure of the buildings
-            self.static_driver = Dataset(self.cfg.postproc.palmwriter.static_driver, "r")
-            # check dimensions
-            if (self.infile.dimensions['x'].size != self.static_driver.dimensions['x'].size or
-                self.infile.dimensions['y'].size != self.static_driver.dimensions['y'].size):
+            pass
+        # open necessary palm static driver to obtain the vertical structure of the buildings
+        self.static_driver = Dataset(self.cfg.postproc.palmwriter.static_driver, "r")
+        try:
+            # check dimensions of static driver and prescribed PALM domain
+            if (ep_cfg.domain.nx != self.static_driver.dimensions['x'].size or
+                ep_cfg.domain.ny != self.static_driver.dimensions['y'].size):
                 log.error("Dimensions of emission domain and static driver domain dows not match. Exit.....")
+                log.fmt_error("Domain x,y: {}, {}, static driver x,y: {}, {}",
+                              ep_cfg.domain.nx, ep_cfg.domain.ny,
+                              self.static_driver.dimensions['x'].size, self.static_driver.dimensions['y'].size)
                 raise IOError
 
             # check needed variables
@@ -416,136 +466,375 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
                 log.error("Static driver does not contain variable zt. Exit.....")
                 raise IOError
 
-            #zt  = self.static_driver.variables['zt'][:].data
-            # test delz config parameter
-            if hasattr(self.cfg.domain, 'delz') and self.cfg.domain.delz != 0:
-                self.delz = self.cfg.domain.delz
-            else:  # it does not exist
-                self.delz = self.cfg.domain.delx
+            # retrieve zt and nt data (terrain height in m and number of terrain layers)
+            self.zt = self.static_driver.variables['zt'][:].data
 
-            # retrieve buildings_3d and zt data
+            # retrieve buildings_3d
             try:
-                self.b3d = self.static_driver.variables['buildings_3d'][:].data
+                self.b3d = self.static_driver.variables['buildings_3d'][:].filled(0).astype(bool)
             except:
                 # build b3d from b2d
-                b2d = self.static_driver.variables['buildings_2d'][:].data
+                b2d = self.static_driver.variables['buildings_2d'][:].filled(0)
                 maxh = b2d.max()
-                maxk = math.floor(maxh / self.delz) + 1
-                self.b3d = np.zeros((maxk, np.shape(b2d)[0], np.shape(b2d)[1]), np.int8)
+                # PALM requires not stretched vertical levels inside the urban canopy
+                # The b3d array can be calculated just from dz
+                maxk = math.floor(maxh / ep_rtcfg.delz) + 1
+                self.b3d = np.zeros((maxk, b2d.shape[0], b2d.shape[1]), dtype=bool)
                 for i in range(np.shape(b2d)[1]):
                     for j in range(np.shape(b2d)[0]):
-                        if b2d[j, i] >= self.delz*0.5:
-                            self.b3d[0:math.floor(b2d[j, i] / self.delz + 0.5)+1, j, i] = 1
+                        if b2d[j, i] >= ep_rtcfg.delz * 0.5:
+                            self.b3d[0:math.floor(b2d[j, i] / ep_rtcfg.delz + 0.5) + 1, j, i] = True
+        finally:
+            self.static_driver.close()
 
-            # init ivsrc counter nad vsrc mapper
-            ivsrc = 0
-            vsrc_map_ijk = {}
+    def receive_molar_weight(self, molar_weight):
+        self.molar_weight = molar_weight
+        log.debug('Molar_weight:', self.molar_weight)
 
-            # process area vsrc from total emiss file
-            # get list of non-zero value locations
-            dshape = list(self.infile.dimensions[dname].size for dname in 'level y x'.split())
-            # eliminate level -1 used for 2D emission
-            startlevel = 1  # level[0] has value -1. This represens 2D emission which needs to be eliminated here
-            dshape[0] = dshape[0] - 1
-            log.debug('startlevel, dshape: ', startlevel, dshape)
-            has_data = np.ones(dshape, dtype=bool)
-            for specid, specname in self.species:
-                v = self.infile.variables[specname][:, :, startlevel:, :, :]
-                vmask = v.mask.min(axis=(0,1))
-                has_data &= vmask
-            # invert values and transpose coordinates to x, y, level
-            has_data = ~has_data
-            # list coordinates of all filled values
-            for level, y, x in zip(*has_data.nonzero()):
-                self.vsrc_i[ivsrc] = x
-                self.vsrc_j[ivsrc] = y
-                # locate k index for given level
-                k = self.locate_level_k( self.b3d[:, y, x], level, y, x) + 1   # this will place volume source at the first grid above the ground in level
-                if k <= 0:
-                    continue
-                # locate terrain top heigh and k dimension
-                # !!! check with PALM procedure of terrain gridding !!!
-                self.vsrc_k[ivsrc] = k
-                # add key to mapping
-                vsrc_map_ijk[(x,y,k)] = ivsrc
-                level_idx = level + startlevel
-                log.fmt_debug('Found vsrc_k = {vsrc_k} for x,y,level,ivsrc = {x}, {y}, {level}, {ivsrc}.', \
-                              vsrc_k=self.vsrc_k[ivsrc], x=x, y=y, level=level, ivsrc=ivsrc)
-                for spec_idx, (specid, specname) in enumerate(self.species):
-                    invar = self.infile.variables[specname][:, :, level_idx, y, x]
-                    for cat_idx, (catid, catname) in enumerate(self.categories):
-                        # !!!HACK!!! PALM vsrc needs units in mol/m3/s for gases and kg/m3/s for PM
-                        # transform PM from g to kg, species in mol units leave unchanged
-                        # distinguish between gasses and PM by (molar weight == 1)
-                        # In future, the model-mechanism units needs to be added
-                        # into the mechanism configuration for every specie
-                        # !!!HACK!!!
-                        unit_fact = 1e-3 if (self.molar_weight[(catid,specid)]==1) else 1
-                        for ts_id in self.ts:
-                            ts_idx = self.ts_lookup[ts_id]
-                            v = invar[ts_idx, cat_idx]
-                            if np.ma.is_masked(v):
-                                continue
-                            for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
-                                dtutc = self.time_shifts[(ts_id, stepdt)]
-                                tf = self.time_factors[dtutc]
-                                try:
-                                    time_factor = float(tf[catid])
-                                except KeyError:
-                                    continue
+    def receive_specie_type(self, specie_type):
+        self.specie_type = specie_type
+        log.debug('Specie_type:', self.specie_type)
 
-                                self.vsrc_value[spec_idx][time_idx, ivsrc] += v * time_factor * self.norm_coef * unit_fact
-                # increase vsrc counter
-                ivsrc += 1
-            # close infile
-            self.infile.close()
+    def receive_emission_levels(self, levels):
+        self.levels = levels
 
-            # process point sources
-            process_ps = True
+    @requires('categories', 'specie_type')
+    def receive_species(self, species):
+        self.species = species
+        self.species_lookup = {member[0]: idx for idx, member in enumerate(self.species)}
+
+    @requires('categories', 'species', 'emission_levels', 'specie_type')
+    def receive_point_vsrc_by_species_category_and_level(self, data):
+        # receive point_vsrc_emiss
+        log.debug('Receive point_vsrc_emiss rows')
+        for row in data:
+            # i, j, level, spec_id, cat_id, ts_id, height, diameter, temperature, velocity, emiss
+            pvsrc = PointVsrcEmis(*row)
+            self.point_vsrc_emiss.append(pvsrc)
+
+    def yield_time_factors(self, ts_id, catid):
+        """Yield (time_idx, time_factor) for each timestep."""
+
+        for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
+            # calculate local time shift
+            dtutc = self.time_shifts[(ts_id, stepdt)]
+            tf = self.time_factors[dtutc]
             try:
-                self.point_vsrc_emiss
-            except:
-                process_ps = False
-                pass
-            if process_ps:
-                for row in self.point_vsrc_emiss:
-                    # row = [i, j, level, spec_id, cat_id, ts_id, height, emiss]
-                    # i,j start from 1 in database and from 0 in netcdf
-                    i = row[0]-1
-                    j = row[1]-1
-                    # locate k index for given level
-                    k = self.locate_level_k(self.b3d[:, j, i], row[2], j, i)
-                    # calculate k according height of point source
-                    # ensure it is higher then building
-                    k = max(math.floor(row[6]/self.cfg.domain.delz), k) + 1
-                    # check if i,j,k already exists in vsrc file
-                    try:
-                        jvsrc = vsrc_map_ijk[(i,j,k)]
-                    except:
-                        jvsrc = ivsrc
-                        vsrc_map_ijk[(i, j, k)] = ivsrc
-                        ivsrc += 1
-                        self.vsrc_i[jvsrc] = i
-                        self.vsrc_j[jvsrc] = j
-                        self.vsrc_k[jvsrc] = k
-                    # for ispec in range(len(self.species_lookup)):
-                    cat_id = row[4]
-                    spec_id = row[3]
-                    unit_fact = 1e-3 if (self.molar_weight[(cat_id, spec_id)] == 1) else 1
-                    for ts_id in self.ts:
-                        # ts_idx = self.ts_lookup[ts_id]
-                        for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
-                            dtutc = self.time_shifts[(ts_id, stepdt)]
-                            tf = self.time_factors[dtutc]
-                            try:
-                                time_factor = float(tf[row[4]])
-                            except KeyError:
-                                continue
-                            spec_idx = self.species_lookup[row[3]]
-                            self.vsrc_value[spec_idx][time_idx, jvsrc] += row[7] * time_factor * self.norm_coef * unit_fact
+                yield time_idx, float(tf[catid])
+            except KeyError:
+                continue
 
-        # close out file
-        self.outfile.close()
+    def process_palm_emissions_from_totals(self, ftotal):
+        """Reads total emissions from ftotal and writes them into vsrc"""
+
+        # inicialize full 3d levels if not already done
+        self.init_full3d_levels(ftotal)
+
+        # Determine vertical extent of the surface area emissions
+        if self.dissolve_area:
+            zlev_start = self.level_kindex.min()
+            zlev_stop = self.level_kindex.max()
+            log.fmt_debug('Vertical extent of area emissions is between k={} and k={}.',
+                          zlev_start, zlev_stop)
+            zlev_stop += 1
+
+            surf3d_shape = (len(self.rt_cfg['run']['datestimes']), zlev_stop-zlev_start,
+                            ep_cfg.domain.ny, ep_cfg.domain.nx)
+            surf3d_iy, surf3d_ix = np.mgrid[0:ep_cfg.domain.ny,0:ep_cfg.domain.nx]
+
+            # Prepare hard mask based on buildings_3d
+            hardmask = np.logical_not(self.b3d[zlev_start:zlev_stop,:,:])
+
+        # Process emissions from the totals file
+        for spec_idx, (specid, specname) in enumerate(self.species):
+            invar = ftotal.variables[specname]
+            outvar = self.vsrc_value[spec_idx]
+
+            # PALM vsrc needs units in mol/m3/s for gases and kg/m3/s for PM
+            # transform PM from g to kg, species in mol units leave unchanged
+            # distinguish between gasses and PM by (molar weight == 1)
+            # In future, the model-mechanism units needs to be added
+            # into the mechanism configuration for every specie
+            unit_fact = 1e-3 if (self.specie_type[specid]==1) else 1
+
+            if self.dissolve_area:
+                emis = np.zeros(surf3d_shape, dtype=invar.dtype)
+
+            for ts_id in self.ts:
+                ts_idx = self.ts_lookup[ts_id]
+
+                for cat_idx, (catid, catname) in enumerate(self.categories):
+                    for level in range(self.nlev):
+                        # level[0] has value -1. This represens 2D emission which needs to be eliminated here
+                        v = invar[ts_idx, cat_idx, level+1, :, :]
+                        yxmask = ~v.mask
+                        if not yxmask.any():
+                            continue
+
+                        # Locate z coordinates for the given level
+                        z = self.level_kindex[level,:,:]
+                        num_missing = (yxmask & self.missing_level[level,:,:]).sum()
+                        if num_missing:
+                            log.fmt_warning('Missing level {} has been replaced by higher level for {} points.',
+                                    level, num_missing)
+
+                        if self.dissolve_area:
+                            # Just gather the emissions into the 3D array
+                            z = z - zlev_start
+
+                            # Process output timesteps
+                            for time_idx, time_factor in self.yield_time_factors(ts_id, catid):
+                                # Direct assignment is not supported with double indexing
+                                newval = emis[time_idx, z, surf3d_iy, surf3d_ix]
+                                newval[yxmask] += v[yxmask] * (time_factor * self.norm_coef * unit_fact)
+                                emis[time_idx, z, surf3d_iy, surf3d_ix] = newval
+
+                        else:
+                            # Add emissions directly to the output file
+
+                            # Find vsrc indices (potentially expanding)
+                            ivsrc = self.vsrc_map.assign_by_yxmask(yxmask, z)
+                            log.fmt_debug('Adding {} points for {}, ts={}, cat={}, lev={}.',
+                                    len(ivsrc), specname, ts_id, catname, level)
+
+                            # Process output timesteps
+                            for time_idx, time_factor in self.yield_time_factors(ts_id, catid):
+                                outvar[time_idx, ivsrc] += v[yxmask] * (time_factor * self.norm_coef * unit_fact)
+
+            if self.dissolve_area:
+                for time_idx in range(len(self.rt_cfg['run']['datestimes'])):
+                    log.fmt_debug('Dissolving {} at time {}.', specname, time_idx)
+                    for axis, nplus, nminus in self.dissolve_area.steps:
+                        dissolve(emis[time_idx,:,:,:], hardmask, axis, nplus, nminus)
+
+                emin = emis.min()
+                if emin < 0.:
+                    badpt = (emis<0.)
+                    log.fmt_warning('Skipping {} cells with negative emissions of {}, min={}, sum={}.',
+                                    badpt.sum(), specname, emin, emis[badpt].sum())
+
+                has_emis = (emis > 0.).any(axis=0)
+                if has_emis.any():
+                    # Find vsrc indices (potentially expanding)
+                    ivsrc = self.vsrc_map.assign_by_zyxmask(zlev_start, 0, 0, has_emis)
+                    log.fmt_debug('Adding {} points for {}.', len(ivsrc), specname)
+
+                    # Process output timesteps
+                    for time_idx in range(len(self.rt_cfg['run']['datestimes'])):
+                        outvar[time_idx, ivsrc] += emis[time_idx,:,:,:][has_emis]
+
+    def process_palm_point_sources(self, ftotal):
+        """Adds emissions from point sources to output file"""
+
+        # inicialize full 3d levels if not already done
+        self.init_full3d_levels(ftotal)
+
+        # TODO: solve problem of the layer shift in case of stretching
+        '''
+        # transformation meteo values to over terrain levels
+        is_above = ep_rtcfg.model_levels[:,na_,na_] > self.zt[na_,:,:]
+        nt = np.argmax(is_above, axis=0)
+        nlays = ep_cfg.domain.nz - nt
+        nlays_max = nlays.max()
+        kcoord = np.empty((nlays_max, ep_cfg.domain.ny, ep_cfg.domain.nx), dtype=int)
+        kcoord[:,:,:] = np.arange(nlays_max)[:,na_,na_]
+        kcoord[:,:,:] += nt[na_,:,:]
+        kcoord = np.minimum(kcoord, ep_cfg.domain.nz-1)
+        t_levels = ep_rtcfg.model_levels[:,na_,na_][kcoord,0,0]
+        t_delz = ep_rtcfg.model_delz[:, na_, na_][kcoord, 0, 0]
+        hghts = t_levels - ep_rtcfg.model_levels[nt] + t_delz * 0.5
+        '''
+
+        self.norm_coefs = 1.0 / (self.rt_cfg['domain']['delx'] * self.rt_cfg['domain']['dely'] * ep_rtcfg.model_delz)
+        nlays = ep_cfg.domain.nz
+        hghts = ep_rtcfg.model_levels_stag
+        pvsrc_relocation = {}
+        first = True
+        for time_idx, stepdt in enumerate(self.rt_cfg['run']['datestimes']):
+
+            log.fmt_debug('Processing point src at time step {} for time {}.',time_idx, stepdt)
+
+            if ep_cfg.postproc.palmwriter.plumerise:
+                met_data = read_netcdf_timestep(time_idx)
+                if first:
+                    # get mapping of the meteorological variables
+                    metvar = {}
+                    for i, v in enumerate(met_data):
+                        metvar[v.name] = i
+
+            for pvsrc in self.point_vsrc_emiss:
+                # i,j start from 1 in database and from 0 in netcdf
+                i = pvsrc.i-1
+                j = pvsrc.j-1
+                # calculate height of the stack from domain bottom
+                height = pvsrc.height + self.zt[j,i]
+                spec_idx = self.species_lookup[pvsrc.spec_id]
+                unit_fact = 1e-3 if (self.specie_type[pvsrc.spec_id] == 1) else 1
+                # kh - k coordinate of the source from domain bottom based on original source height
+                kh = math.floor(height/self.cfg.domain.delz) + 1
+                # kh - k coordinate of terrain from domain bottom
+                kt = math.floor(self.zt[j,i] / self.cfg.domain.delz)
+                # kht - k coordinate of the source from terrain
+                kht = kh - kt
+
+                log.fmt_debug('Processing point src at {},{} with height {} for specie {}.',
+                               i, j, pvsrc.height, pvsrc.spec_id)
+
+                if not ep_cfg.postproc.palmwriter.plumerise:
+                    # locate k index for given level
+                    k = self.level_kindex[pvsrc.level, j, i]
+                    # calculate k according height of point source
+                    # ensure it is higher than building
+                    k = max(kh, k)
+
+                    # Obtain vsrc index (expanding if necessary)
+                    ivsrc = self.vsrc_map[k,j,i]
+
+                # calculate local time shift
+                dtutc = self.time_shifts[(pvsrc.ts_id, stepdt)]
+                tf = self.time_factors[dtutc]
+                time_factor = float(tf[pvsrc.cat_id])
+
+                if ep_cfg.postproc.palmwriter.plumerise:
+                    try:
+                        newloc = pvsrc_relocation[kht,j,i]
+                    except KeyError:
+                        # Check whether the pvsrc postition is not blocked by
+                        # a building
+                        if self.b3d[kht,j,i]:
+                            # blocked by a building, need to find the nearest free location.
+                            newloc = get_nearest_free(self.b3d, (kht, j, i))
+                            log.fmt_warning('Point source at {} blocked by a building, had to be moved to {}.',
+                                    (kht, j, i), newloc)
+                            pvsrc_relocation[kht,j,i] = newloc
+                        else:
+                            pvsrc_relocation[kht,j,i] = newloc = None
+
+                    if newloc is not None:
+                        kht, j, i = newloc
+                        # Calculate terrain height in the new location
+                        kt = math.floor(self.zt[j,i] / self.cfg.domain.delz)
+                        kh_old = kh
+                        kh = kht + kt
+                        # When location is shifted, we may have to adjust height for the plumerise
+                        if kh != kh_old:
+                            height = (kh - 0.5) * self.cfg.domain.delz
+
+                    # calculate plume: 'ta', 'pa', 'wndspd', 'zf'
+                    k0, pfract = get_plume_frac(nlays,hghts,
+                                    met_data[metvar['ta']].data[i,j,:],
+                                    met_data[metvar['pa']].data[i,j,:],
+                                    met_data[metvar['wndspd']].data[i,j,:],
+                                    height,pvsrc.diameter,pvsrc.temperature,pvsrc.velocity)
+                    k0 = max(k0, kt) # eliminate obscure cases where pvsrc.height==0 and k0 can be under the terrain
+                    kn = k0 + len(pfract)
+                    k0t = k0 - kt
+                    knt = kn - kt
+
+                    # Eliminate cells blocked by building
+                    kn_b3d = min(knt, self.b3d[1:,j,i].shape[0])  # common top for plume and the b3d column (from buildings_3d array)
+                    nfrac_b3d = max(0, kn_b3d - k0t)  # cells in the column that are within both the plume AND the b3d
+                    if nfrac_b3d > 0:
+                        pfract[:nfrac_b3d][self.b3d[k0t+1:kn_b3d+1,j,i]] = 0.   # b3d has significant fileds indexed from 1
+                        # re-normalization of the pfrac array
+                        pfrac_sum = pfract.sum()
+                        if pfrac_sum == 0.:
+                            # whole plume is blocked by a building, this should not happen thanks to relocation in the palm procedure
+                            log.fmt_warning('Plume is fully blocked by buildings, avoiding plumrise.' )
+                            log.fmt_warning('i,j,kht,k0t,knt: {}, {}, {}, {}, {}.',i,j,kht,k0t,knt )
+                            log.fmt_warning('Pfract: {}.', pfract)
+                            #raise RuntimeError('Plume is fully blocked by buildings')
+                            # set plume to the original point
+                            pfract = [1.0]
+                            k0 = kh
+                            k0t = kht
+                            kn = k0 + 1
+                            knt = k0t + 1
+                        else:
+                            pfract /= pfrac_sum
+
+                    # Emission values in plume (using fractions)
+                    emis = pvsrc.emiss * time_factor * unit_fact * self.norm_coefs[k0:kn] * pfract[:]
+                    emis = emis[:,na_,na_]
+
+                    if self.dissolve_point:
+                        # Expand emission array for dissolving
+                        dis = self.dissolve_point
+                        emis = dis.expand(emis, (k0, j, i))
+
+                        # Prepare expanded hardmask (by buildings)
+                        hardmask = np.ones(emis.shape, dtype=bool)
+                        # b3d may not reach high enough
+                        bz0 = min(dis.z0, self.b3d.shape[0])
+                        bz1 = min(dis.z1, self.b3d.shape[0])
+                        nbz = bz1 - bz0
+                        if nbz:
+                            hardmask[-nbz:,:,:] &= np.logical_not(self.b3d[bz0:bz1,dis.y0:dis.y1,dis.x0:dis.x1])
+
+                        # Perform dissolving
+                        log.fmt_tracing('Dissolving point src at {} for {}, size {}, at time {}.',
+                                (k0t, j, i), pvsrc.spec_id, emis.shape, time_idx)
+                        for axis, nplus, nminus in self.dissolve_point.steps:
+                            dissolve(emis, hardmask, axis, nplus, nminus)
+
+                        ke, je, ie = dis.z0, dis.y0, dis.x0
+
+                        emin = emis.min()
+                        if emin < 0.:
+                            # re-normalize positive values to allow eliminate the negative values
+                            ec = emis.sum() / emis[emis>0.].sum()
+                            emis *= ec
+                            log.fmt_warning('Skipping {} cells with negative emissions, ' +
+                                            're-normalize positive values to original emission with coeficient {}.',
+                                            (emis<0.).sum(), ec)
+                            #badpt = (emis<0.)
+                            #log.fmt_warning('Skipping {} cells with negative emissions of {}, min={}, sum={}.',
+                            #                badpt.sum(), pvsrc.spec_id, emin, emis[badpt].sum())
+
+                    else:
+                        # Postion of emission has not changed
+                        ke, je, ie = k0, j, i
+
+                    mask = emis > 0.
+
+                    # Obtain vsrc indices (expanding file if necessary)
+                    vsrc_idx = self.vsrc_map.assign_by_zyxmask(ke, je, ie, mask)
+                    if vsrc_idx.size > 0:
+                        # Add to emiss file
+                        self.vsrc_value[spec_idx][time_idx,vsrc_idx] += emis[mask]
+
+                else:
+                    self.vsrc_value[spec_idx][time_idx,ivsrc] += pvsrc.emiss * time_factor * self.norm_coefs[k] * unit_fact
+
+    def finalize(self):
+        """
+        Finalization steps
+        ------------------
+         - write temporary disagregated vsrc emission from total file
+         - write vsrc point emission
+         - close the file
+        """
+
+        # if number of vsrc > 0, write emisssion flux for vsrc levels (level>=0)
+        # emission into 3d palm emiss structure
+        try:
+            log.info('Initializing PALM outfile structure and mapping')
+            self.create_vsrc_emiss_file_struct()
+            self.vsrc_map = VsrcMap(self.vsrc_i, self.vsrc_j, self.vsrc_k,
+                                    self.vsrc_value)
+            ftotal = None
+
+            log.info('Adding PALM vsrc emissions from totals file')
+            with Dataset(self.cfg.postproc.palmwriter.totalfile, 'r') as ftotal:
+                self.process_palm_emissions_from_totals(ftotal)
+
+            if self.point_vsrc_emiss:
+                log.info('Adding PALM vsrc emissions from point sources')
+                self.process_palm_point_sources(ftotal)
+
+        finally:
+            # close out file
+            self.outfile.close()
 
 
     def create_vsrc_emiss_file_struct(self):
@@ -576,8 +865,8 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
 
         # Fill netcdf attributes according PIDS
         self.outfile.Conventions = "CF-1.7"
-        self.outfile.origin_x = self.cfg.domain.xorg - self.cfg.domain.nx * self.cfg.domain.delx / 2.0
-        self.outfile.origin_y = self.cfg.domain.yorg - self.cfg.domain.ny * self.cfg.domain.dely / 2.0
+        self.outfile.origin_x = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx'] * self.rt_cfg['domain']['delx'] / 2.0
+        self.outfile.origin_y = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny'] * self.rt_cfg['domain']['dely'] / 2.0
         #self.outfile.origin_z =
         # calculate lon,lat of the left bottom corner of the domain for output
         # IT DOES NOT WORK ON ARIEL (is it necessary?)
@@ -603,47 +892,127 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
             log.debug('Check configuration parameters casename and grid_name.')
             log.debug(ex)
 
-    def locate_level_k(self, b, level, y, x):
-        # locate k index for level = 0
-        ka = np.where(b == 1)[0]
-        if ka.size == 0:
-            if level == 0:
-                k = 0
-            else:
-                log.fmt_error('No building found in x,y,level = {x}, {y}, {level}. Skipping.', x=x, y=y, level=level)
-                return -1
-        else:
-            k = ka.max()
-        if level > 0:
-            # locate k for level>0
-            b = b[:k + 1]
-            found = False
-            for l in range(1, level + 1):  # levels from 1 to level
-                # next top of air
-                ka = np.where(b == 0)[0]
-                if ka.size == 0:
-                    log.fmt_error('Only level {l} (building) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l,
-                                  x=x, y=y, level=level)
-                    return -1
+        # create netcdf dimensions and variables for 3d volume sources
+        default_index = -1   # ijk index
+        nvsrc_chunk = 256*1024 # 1 MB of f4, i4
 
-                k = ka.max()
-                b = b[:k + 1]
-                # next top of building
-                ka = np.where(b == 1)[0]
-                if ka.size == 0:
-                    if l < level:
-                        log.fmt_error('Only level {l} (ground) found in x,y,level = {x}, {y}, {level}. Skipping.', l=l,
-                                      x=x, y=y, level=level)
-                    else:
-                        # reached ground
-                        k = 0
-                        found = True
-                else:
-                    # shrink to next top of the building
-                    k = ka.max()
-                    b = b[:k + 1]
-            if not found:
-                # k for level not found, do not process point
-                return -1
-        # return value k
-        return k
+        self.outfile.createDimension('nvsrc') # Unlimited dimension
+
+        self.vsrc_i = self.outfile.createVariable('vsrc_i', 'i4', ('nvsrc',), fill_value=default_index, chunksizes=(nvsrc_chunk,))
+        self.vsrc_j = self.outfile.createVariable('vsrc_j', 'i4', ('nvsrc',), fill_value=default_index, chunksizes=(nvsrc_chunk,))
+        self.vsrc_k = self.outfile.createVariable('vsrc_k', 'i4', ('nvsrc',), fill_value=default_index, chunksizes=(nvsrc_chunk,))
+
+        self.vsrc_value = [None] * len(self.species)
+        for spec in self.species:
+            #for ispec in range(len(self.species_lookup)):
+            ispec = self.species_lookup[spec[0]]  # coordinate of species in netcdf (0..nspecies-1)
+            log.debug('species[ispec]', ispec, self.species[ispec])
+            vname = 'vsrc_' + self.species[ispec][1]
+            log.debug('createVariable: ' + vname)
+            self.vsrc_value[ispec] = self.outfile.createVariable(vname, 'f4', (self.names['t_dim'], 'nvsrc', ),
+                                                                 fill_value=float(self.cfg.postproc.palmwriter.undef),
+                                                                 chunksizes=(1,nvsrc_chunk))
+            self.vsrc_value[ispec].missing_value = float(self.cfg.postproc.palmwriter.undef)
+            self.vsrc_value[ispec].lod = 2
+            if self.specie_type[spec[0]] == 0:
+                # gas
+                self.vsrc_value[ispec].units = 'mol/m3/s'
+            else:
+                # PM
+                self.vsrc_value[ispec].units = 'kg/m3/s'
+            self.vsrc_value[ispec].long_name = 'volume emission values ' + self.species[ispec][1]
+            self.vsrc_value[ispec].standard_name = vname
+            self.vsrc_value[ispec][:] = 0.0
+            log.debug('Variable ' + vname + ' created')
+
+    def init_full3d_levels(self, ftotal):
+        """Finds levels 0-n in buildings_3d
+
+        buildings_3d[k,j,i] = 1 where building and = 0 where air
+        for each j, i:
+            Level 0: highest k with air directly above building
+            Level 1: second highest k with air directly above building
+            etc.
+        """
+        if hasattr(self, 'level_kindex') and hasattr(self, 'missing_level') and hasattr(self, 'nlev'):
+            # init_full3d_levels was already called
+            return
+
+        self.nlev = len(self.levels) - 1
+        if ftotal is not None:
+            self.nlev = max(self.nlev, ftotal.dimensions['level'].size - 1)
+            log.fmt_debug('Using {} levels. FUME: {} levels ({}), totals file: {} levels ({}).',
+                self.nlev, len(self.levels), self.levels, ftotal.dimensions['level'].size,
+                ftotal.variables['level'][:])
+
+
+        log.debug('Finding levels in PALM 3D building data.')
+        nz, ny, nx = self.b3d.shape
+        nxy = ny*nx
+
+        # array for vertical comparison, has 1 extra level at bottom
+        building_b = np.zeros((nz+1,ny,nx), dtype='i4')
+        building_b[1:,:,:] = self.b3d
+
+        # The logic taken from previous version is equivalent to b3d[0,:,:] being always filled with terrain
+        building_b[0:2,:,:] = 1
+
+        # find building-air boundary
+        air_above_bld = (building_b[:-1,:,:] - building_b[1:,:,:]) == 1
+        air_above_bld_rev = air_above_bld[::-1,:,:] #reversed z-coordinate for searching from above
+
+        # find maximum number of levels in data
+        nlev_b3d = air_above_bld.sum(axis=0).max()
+        nlev = self.nlev #min(nlev_b3d, self.nlev)
+        log.fmt_debug('Found {} levels in 3D building data. Preparing {} levels.', nlev_b3d, nlev)
+
+        # Prepare open grid for indexing with a 2D layer of z-coordinates
+        oy, ox = np.ogrid[0:ny,0:nx]
+
+        self.level_kindex = level_kindex = np.empty((nlev, ny, nx), dtype='i4')
+        self.missing_level = missing_level = np.empty((nlev, ny, nx), dtype=bool)
+        lev = 0
+        previous_level = np.array([[1]], dtype='i4')
+        while 1:
+            # Find highest boundary, argmax finds 1st occurrence along z in the reversed field
+            highest = air_above_bld_rev.argmax(axis=0)
+
+            # Columns with no boundary returned 0, at that z-coord it will be False
+            no_boundary = ~(air_above_bld_rev[highest,oy,ox])
+            nno_boundary = no_boundary.sum()
+            log.fmt_debug('Level {}: found {} out of {} points', lev, nxy-nno_boundary, nxy)
+
+            # Finalize level coordinate array
+            level_kindex[lev,:,:] = np.where(no_boundary, previous_level, nz - 1 - highest) #flip back reversed z-coordinate
+            missing_level[lev,:,:] = no_boundary
+
+            previous_level = level_kindex[lev,:,:]
+            lev += 1
+            if lev >= nlev:
+                break
+
+            # clear highest so that we continue with the next highest
+            air_above_bld_rev[highest,oy,ox] = 0
+
+def get_nearest_free(mask, coord):
+    """Find the point with mask==False nearest to coord"""
+
+    # Find the selection of mask (coord +/- buffer)
+    maxshift = ep_cfg.postproc.palmwriter.ptsrc_shift_max_points
+    coord = np.asanyarray(coord)
+    coord0 = np.maximum(0, coord - maxshift)
+    coord1 = np.minimum(np.asanyarray(mask.shape), coord + (maxshift+1))
+    newcoord = coord - coord0 #coord within selection
+
+    sel = tuple(slice(c0, c1) for c0, c1 in zip(coord0, coord1))
+
+    # Identify free points, calculate distance from coord
+    free_pt = ~(mask[sel])
+    if not free_pt.any():
+        raise RuntimeError(f'No free points found near {coord} within {sel}.')
+    free_pt_list = np.nonzero(free_pt)
+    distance = sum(np.square(i-c) for i, c in zip(free_pt_list, newcoord))
+
+    # Get nearest point, recalculate to original coords
+    nearest_idx = np.argmin(distance) #index within list of free pts
+    return tuple(fp[nearest_idx]+c0 for fp, c0 in zip(free_pt_list, coord0))

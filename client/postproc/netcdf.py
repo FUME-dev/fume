@@ -18,9 +18,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -150,13 +150,13 @@ class NetCDFWriter(DataReceiver):
 
         if self.actions['create_z_dim']:
             self.outfile.createDimension(self.names['z_dim'],
-                                         self.cfg.domain.nz)
+                                         self.rt_cfg['domain']['nz'])
         if self.actions['create_y_dim']:
             self.outfile.createDimension(self.names['y_dim'],
-                                         self.cfg.domain.ny)
+                                         self.rt_cfg['domain']['ny'])
         if self.actions['create_x_dim']:
             self.outfile.createDimension(self.names['x_dim'],
-                                         self.cfg.domain.nx)
+                                         self.rt_cfg['domain']['nx'])
         if self.actions['create_t_dim']:
             self.outfile.createDimension(self.names['t_dim'], None)
 
@@ -200,7 +200,7 @@ class NetCDFTotalWriter(NetCDFWriter):
             self.z_var = self.outfile.createVariable(self.names['z_var'], 'i4',
                                                      [self.names['z_dim']])
 
-    @requires('categories','time_shifts')
+    @requires('categories', 'time_shifts')
     def receive_species(self, species):
         self.species = species
         self.species_lookup = {member[0]: idx
@@ -398,7 +398,7 @@ class NetCDFTotalPointWriter(NetCDFWriter):
                 log.error('Missing configuration parameter postproc.netcdfareawriter.totalfile!')
         super().setup(*args, **kwargs)
 # do this within the receive stack params, as it tells the size of the z-dimension (numstk)
-#        self.outfile.createDimension(self.names['z_dim'], self.cfg.domain.nz)
+#        self.outfile.createDimension(self.names['z_dim'], self.rt_cfg['domain']['nz'])
         self.outfile.createDimension(self.names['y_dim'], 1)
         self.outfile.createDimension(self.names['x_dim'], 1)
 
@@ -415,8 +415,8 @@ class NetCDFTotalPointWriter(NetCDFWriter):
         var_int =      ['ISTACK', 'STKCNT', 'ROW', 'COL', 'LMAJOR', 'LPING']
         var_int_units =['none', 'none', 'none', 'none', 'none',  'none']
         stkintvars = []
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
         for var in var_int:
             stkvar = self.outfile.createVariable(var, 'i4', (self.names['z_dim']))
             stkvar.longname = '{0:16s}'.format(var)
@@ -426,8 +426,8 @@ class NetCDFTotalPointWriter(NetCDFWriter):
 
         stkintvars[0][:] = np.array([self.stacks_id])
         stkintvars[1][:] = np.array([range(0, self.numstk)])
-        stkintvars[3][:] = np.array([ ((self.point_src_params[:,2]-xorig)/self.cfg.domain.delx).astype('int') + 1])
-        stkintvars[2][:] = np.array([ ((self.point_src_params[:,4]-yorig)/self.cfg.domain.dely).astype('int') + 1])
+        stkintvars[3][:] = np.array([ ((self.point_src_params[:,2]-xorig)/self.rt_cfg['domain']['delx']).astype('int') + 1])
+        stkintvars[2][:] = np.array([ ((self.point_src_params[:,4]-yorig)/self.rt_cfg['domain']['dely']).astype('int') + 1])
         stkintvars[4][:] = np.zeros((self.numstk),dtype=int)
         stkintvars[5][:] = np.zeros((self.numstk),dtype=int)
         
@@ -569,16 +569,16 @@ class NetCDFTotal3DWriter(NetCDFWriter):
         self.stacks_lookup = {member: idx for idx, member in enumerate(self.stacks_id)}
         self.numstk = len(self.stacks_id)
 
-        xorig = self.cfg.domain.xorg - self.cfg.domain.nx*self.cfg.domain.delx/2.0
-        yorig = self.cfg.domain.yorg - self.cfg.domain.ny*self.cfg.domain.dely/2.0
+        xorig = self.rt_cfg['domain']['xorg'] - self.rt_cfg['domain']['nx']*self.rt_cfg['domain']['delx']/2.0
+        yorig = self.rt_cfg['domain']['yorg'] - self.rt_cfg['domain']['ny']*self.rt_cfg['domain']['dely']/2.0
         maxlevel = 20000
         mlevels = [ int(float(l)) for l in self.cfg.postproc.netcdf3dwriter.levels ]
         heights = np.zeros((maxlevel),dtype=int)
         for i in range(1,len(mlevels)):
             heights[mlevels[i-1]:mlevels[i]] = i
 
-        self.stacks_x = [ min(int((self.point_src_params[s,2]-xorig)/self.cfg.domain.delx),self.cfg.domain.nx-1) for s in range(self.numstk)]
-        self.stacks_y = [ min(int((self.point_src_params[s,4]-yorig)/self.cfg.domain.dely),self.cfg.domain.ny-1) for s in range(self.numstk)]
+        self.stacks_x = [ min(int((self.point_src_params[s,2]-xorig)/self.rt_cfg['domain']['delx']),self.rt_cfg['domain']['nx']-1) for s in range(self.numstk)]
+        self.stacks_y = [ min(int((self.point_src_params[s,4]-yorig)/self.rt_cfg['domain']['dely']),self.rt_cfg['domain']['ny']-1) for s in range(self.numstk)]
         self.stacks_layer =[ heights[int(self.point_src_params[s,5])] for s in range(self.numstk)]
 
     def receive_all_species(self, aspecies):

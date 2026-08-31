@@ -19,9 +19,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -40,7 +40,6 @@ def data_provider(name='postproc.emissprovider.EmissProvider'):
     class_obj = getattr(mod_obj, class_name)
     dp_instance = class_obj(cfg=ep_cfg, rt_cfg=ep_rtcfg,
                             db=ep_connection)
-
     return dp_instance
 
 
@@ -56,5 +55,4 @@ def run():
         class_obj = getattr(mod_obj, class_name)
         dp.register_receiver(class_obj(cfg=ep_cfg, rt_cfg=ep_rtcfg,
                                        db=ep_connection))
-
     dp.run()

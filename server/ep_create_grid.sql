@@ -1,5 +1,5 @@
 /*
-Description: It creates grid table for in FUME model.
+Description: It creates grid table in FUME model.
 */
 
 /*
@@ -15,9 +15,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 */
 
@@ -25,7 +25,7 @@ CREATE SEQUENCE IF NOT EXISTS spatial_ref_sys_srid_seq MINVALUE 100000;
 
 
 /************************
-* It creates grid of name gridtable and extension nx,ny.
+* It creates and fills gridtable with grid geometry, derived from conf definitions.
 * The resolution of the grid ix dx,dy, origin is ox,oy
 * and coordinate system srid.
 *************************/
@@ -68,26 +68,8 @@ declare
 begin
     ret = false;
     -- tn = quote_ident(gridschema) || '.' || quote_ident(gridtable);
-    -- drop old grid table
-    --sqltext = 'drop table if exists ' || tn || ';';
-    sqltext = format('drop table if exists %I.%I ', gridschema, gridtable);
-    execute sqltext;
-    -- create new grid table
-    sqltext = format('create table %I.%I ( ' ||
-        'grid_id serial, ' ||
-        'i integer, ' ||
-        --'j integer ' ||
-        'j integer, ' ||
-        'xmi double precision, ' ||
-        'xma double precision, ' ||
-        'ymi double precision, ' ||
-        'yma double precision  ' ||
-        ' )', gridschema, gridtable);
-    execute sqltext;
-    sqltext = format('alter table %I.%I add primary key (grid_id)', gridschema, gridtable);
-    execute sqltext;
-    -- create geometry column
-    perform AddGeometryColumn(gridschema, gridtable, 'geom', srid, 'POLYGON', 2);
+
+    perform ep_create_empty_gridtable(gridschema, gridtable, srid);
 
     -- create particular gridboxes and intersect them with timezones
     sqlinsert = format('insert into %I.%I (' ||
@@ -125,6 +107,56 @@ language plpgsql volatile
 cost 100;
 
 
+/************************
+* It creates empty gridtable with srid. This is used to store domain geometry.
+* It can be regular grid or general polygons.
+*************************/
+drop function if exists ep_create_empty_gridtable(
+    gridschema text,
+    gridtable text,
+    srid integer);
+
+create or replace function ep_create_empty_gridtable(
+    gridschema text,
+    gridtable text,
+    srid integer)
+  returns boolean as
+$$
+declare
+    ret boolean;
+    res text;
+    sqltext text;
+    sqlinsert text;
+begin
+    ret = false;
+
+    sqltext = format('drop table if exists %I.%I ', gridschema, gridtable);
+    execute sqltext;
+
+    -- create new grid table
+    sqltext = format('create table %I.%I ( ' ||
+        'grid_id serial, ' ||
+        'i integer, ' ||
+        'j integer, ' ||
+        'xmi double precision, ' ||
+        'xma double precision, ' ||
+        'ymi double precision, ' ||
+        'yma double precision  ' ||
+        ' )', gridschema, gridtable);
+    execute sqltext;
+    sqltext = format('alter table %I.%I add primary key (grid_id)', gridschema, gridtable);
+    execute sqltext;
+
+    -- create geometry column
+    perform AddGeometryColumn(gridschema, gridtable, 'geom', srid, 'POLYGON', 2);
+
+    ret = true;
+    return ret;
+end
+$$
+language plpgsql volatile
+cost 10;
+
 
 /************************
 * It creates grid of name gridtable and extension nx,ny.
@@ -160,6 +192,7 @@ declare
     ag double precision;
     geomgrid geometry;
     tzid integer;
+    grid_id_orig integer;
     geomi geometry;
 begin
     ret = false;
@@ -183,23 +216,24 @@ begin
         raise notice 'sqltext = %', sqltext;
         execute sqltext;
     else
-        sqlloop = format('select i, j, geom from %I.%I',conf_schema, ep_grid);
+        sqlloop = format('select i, j, geom, grid_id from %I.%I',conf_schema,
+        ep_grid);
         raise notice 'sqlloop = %', sqlloop;
         sqltext = format('select ST_CollectionExtract(ST_Intersection(geom,$1), 3),tz_id from %I.%I where ST_Intersects(geom,$2)',
                           case_schema, ep_timezones);
         raise notice 'sqltext = %', sqltext;
         sqlinsert = format('insert into %I.%I (' ||
-                  'i, j, tz_id, geom) values (' ||
-                  '$1, $2, $3, $4 )', case_schema, ep_grid_tz);
+                  'i, j, tz_id, geom, grid_id_orig) values (' ||
+                  '$1, $2, $3, $4, $5)', case_schema, ep_grid_tz);
         raise notice 'sqlinsert = %', sqlinsert;
 
-        for i,j,geomgrid in execute sqlloop
+        for i,j,geomgrid,grid_id_orig in execute sqlloop
         loop
             for geomi,tzid in execute sqltext using geomgrid,geomgrid
             loop
                 --execute format('select ST_GeometryFromText(%L,%L)', geomtext, srid) into geombin;
                 --raise notice 'geombin=%', geombin;
-                execute sqlinsert using i, j, tzid, ST_Multi(geomi);
+                execute sqlinsert using i, j, tzid, ST_Multi(geomi), grid_id_orig;
                 --raise notice 'Added gridbox %, %, %, %, %', i, j, tzid, ag, ST_Area(geomi), ST_Area(geomi)/ag, ST_AsText(geomi);
             end loop;
         end loop;

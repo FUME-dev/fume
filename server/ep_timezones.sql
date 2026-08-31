@@ -15,9 +15,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 */
 
@@ -149,7 +149,7 @@ begin
         into allcountries;
 --  raise notice 'Point9 % ', allcountries;
 
-    -- 3. create generric timezones relevant for modelled domain
+    -- 3. create generic timezones relevant for modelled domain
     -- 3a. create temporary table for transformed gridpoints
     --execute 'create table test.ep_grid_points (
     execute 'create temporary table ep_grid_points (
@@ -164,7 +164,10 @@ begin
     sqlinsert = 'insert into ep_grid_points (geom, tz) values ( $1, $2 )';
     --for grid_gid, grid_geom, grid_i,grid_j in execute format('select "gid", "geom", i,j from %I.%I', grid_schema, grid_table ) loop
     for grid_geom in execute format('select "geom" from %I.%I', grid_schema, grid_table ) loop
-        geomls = (ST_Dump(ST_Boundary(grid_geom))).geom;
+        raise notice 'st_dump %', grid_geom;
+        --return false;
+        geomls = ST_Boundary(grid_geom);
+        --geomls = (ST_Dump(ST_Boundary(grid_geom))).geom;
         for il in 2..ST_NPoints(geomls) loop
             geomp1 = ST_SetSRID(ST_PointN(geomls,il-1),srid);
             geomp2 = ST_SetSRID(ST_PointN(geomls,il),srid);

@@ -16,9 +16,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -221,13 +221,13 @@ def create_transformation(trans):
         except AttributeError:
             outrel = None
         transformation = IntersectTransformation(inrel2=inrel2, outrel=outrel)
-
-    elif trans.type == 'surrogate' and hasattr(trans, 'surrogate_set') and trans.surrogate_set is not None:
-        if hasattr(trans, 'surrogate_type'):
-            transformation = SurrogateTransformation(surset=trans.surrogate_set, surtype=trans.surrogate_type)
+    elif trans.type == 'surrogate':
+        if hasattr(trans, 'surrogate_set') and trans.surrogate_set is not None:
+            transformation = SurrogateTransformation(surset=trans.surrogate_set, surtype=trans.surrogate_type, scale=trans.scale)
         else:
-            transformation = SurrogateTransformation(surset=trans.surrogate_set)
-
+            log.fmt_error("Transaction of the type surrogate has not set surrogate_set mandatory parameter. \n Surrogate type: {}", trans.surrogate_type)
+            ep_connection.commit()
+            raise Exception
     elif trans.type == 'scenarios':
         transformation = ScenarioTransformation(transparams)
     elif trans.type == 'level_filter':

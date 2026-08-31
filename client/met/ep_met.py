@@ -38,52 +38,99 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
+import numpy as np
 from lib.ep_config import ep_cfg
 from lib.ep_libutil import ep_dates_times,  ep_rtcfg
 from lib.ep_geo_tools import *
 import lib.ep_logging
 log = lib.ep_logging.Logger(__name__)
 from importlib import import_module
-from  met.ep_met_netcdf import write_netcdf
-from met.ep_met_interp import interp_weights, interpolate, met_interp
+from  met.ep_met_netcdf import write_netcdf_header, write_netcdf_timestep, check_netcdf_file, read_netcdf_timestep
+from met.ep_met_interp import interp_weights, interpolate, met_interp, met_create_vinterp
+from  met.ep_met_data import ep_met_data
 
-def get_met(met):
+vinterp_vars = ['ta','qa','pa','ua','va','wndspd'] # zf only for testing purposes
+
+def get_met():
     """
     Main wrapping function to import meteorological data from one of ALADIN, WRF or RegCM
     """
-    if len(met) != 0:
-        log.fmt_debug('Getting meteorology for {}', met)
-        met_type  = ep_cfg.input_params.met.met_type
-        if met_type == 'ALADIN':
-            mtls = 'aladin' 
-        elif met_type == 'WRF':
-            mtls = 'wrf'   
-        elif met_type == 'RegCM':
-            mtls = 'regcm'
-        else:
-            log.debug('EE: Unknown met model.')
-            raise ValueError
+    # First test reading the saved processed meteo file
+    log.fmt_debug('Checking saved processed meteorology')
+    met_vars = list(ep_rtcfg['required_met'])
+    dts = ep_dates_times()
+    if check_netcdf_file(dts):
+        log.fmt_debug('Saved meteorology satisfies conditions')
+        return
 
-        dts = ep_dates_times()
-        mod_name = 'met.{}.ep_{}'.format(mtls,mtls)
-        func_name = 'ep_{}_met'.format(mtls)
-        mod_obj = import_module(mod_name)
-        func_obj = getattr(mod_obj, func_name)
-        met_data = func_obj(met, dts)
-        
-        if ep_cfg.input_params.met.met_interp:
-            ep_rtcfg['met'] = [met_interp(m) for m in met_data]
-        else:
-            ep_rtcfg['met'] = met_data
-
-        if ep_cfg.input_params.met.met_netcdf:
-            log.fmt_debug('II: writing met data to {} for testing purposes.', ep_cfg.input_params.met.met_netcdf_file)
-            write_netcdf(ep_rtcfg['met'], dts, ep_cfg.input_params.met.met_netcdf_file, exclude = ep_cfg.input_params.met.met_netcdf_exclude)
+    # saved processed meteorology is not available, read and interpolate from mesoscale files
+    met_type  = ep_cfg.input_params.met.met_type
+    if met_type == 'ALADIN':
+        mtls = 'aladin'
+    elif met_type == 'WRF':
+        mtls = 'wrf'
+    elif met_type == 'RegCM':
+        mtls = 'regcm'
     else:
-        log.debug('No meteorology needed to import.')     
+        log.debug('EE: Unknown met model.')
+        raise ValueError
+
+    mod_name = 'met.{}.ep_{}'.format(mtls,mtls)
+    mod_obj = import_module(mod_name)
+
+    # read needed meteorological model datetimes and associated files
+    func_name = 'ep_{}_met_modeldates'.format(mtls)
+    func_obj = getattr(mod_obj, func_name)
+    modeldates = func_obj(dts)
+
+    # function for reading of one fume timestep
+    func_name = 'ep_{}_met'.format(mtls)
+    func_obj = getattr(mod_obj, func_name)
+    first = True
+    for it, dt in enumerate(dts):
+        # read individual timestep
+        met_data = func_obj(dt, modeldates, met_vars)
+
+        if ep_cfg.input_params.met.met_interp:
+            log.fmt_debug('Interpolation of the timestep {}: {}', it, dt)
+            # Interpolate horizontally
+            met_data = met_interp(met_data)
+
+            # Interpolate vertically
+            if ep_cfg.input_params.met.met_vinterp:
+                zf, = [v for v in met_data if v.name=='zf']
+                hght = ep_rtcfg.model_levels
+                interp = met_create_vinterp(hght, zf.data)
+                vdata = []
+                for v in met_data:
+                    if v.name == 'zf':
+                        # Assign prescibed model heights.
+                        # Note: Tested that zf interpolates correctly to prescribed heights (with extrapolated
+                        # bottom) when using interp().
+                        nx, ny, nzm = v.data.shape
+                        arr = np.empty((nx, ny, len(hght)), v.data.dtype)
+                        arr[:,:,:] = hght[np.newaxis, np.newaxis, :]
+                        vdata.append(ep_met_data(v.name, arr))
+                    elif v.name in vinterp_vars:
+                        vdata.append(ep_met_data(v.name, interp(v.data)))
+                    else:
+                        vdata.append(v)
+
+                met_data = vdata
+
+        if first:
+            # write netcdf file header
+            ncf = write_netcdf_header(met_data, dts, ep_cfg.input_params.met.met_netcdf_file)
+            first = False
+
+        # write timestep to netcdf file
+        write_netcdf_timestep(met_data, it, dt, ncf)
+
+    # close ncf file
+    ncf.close()

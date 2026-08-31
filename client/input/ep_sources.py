@@ -19,9 +19,9 @@ Public License for more details.
 
 Information and source code can be obtained at www.fume-ep.org
 
-Copyright 2014-2023 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
-Copyright 2014-2023 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
-Copyright 2014-2023 Czech Hydrometeorological Institute, Prague, Czech Republic
+Copyright 2014-2026 Institute of Computer Science of the Czech Academy of Sciences, Prague, Czech Republic
+Copyright 2014-2026 Charles University, Faculty of Mathematics and Physics, Prague, Czech Republic
+Copyright 2014-2026 Czech Hydrometeorological Institute, Prague, Czech Republic
 Copyright 2014-2017 Czech Technical University in Prague, Czech Republic
 """
 
@@ -108,7 +108,7 @@ def import_sources(path=None, source_schema=None):
             report.record.message('Emission inventory file: {}.', os.path.abspath(inv_file))
             ep_read_sources(inv_file, path, source_schema, conf_schema, 'emission')
         else:
-            log.info('... no emission inventory file found.')
+            log.info(f'... no emission inventory file found.')
             report.record.message('Emission inventory file not imported.')
 
     # control sums of imported emissions
@@ -138,8 +138,183 @@ def import_sources(path=None, source_schema=None):
             log.info('... no activity data inventory file found.')
             report.record.message('Activity data inventory file not imported.')
             
-
 def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
+    """
+    Read emission (activity) sources listed in inventory file (tab-separated txt or ini-style).
+    Guesses the file type based on the extension...
+    """
+
+    file_root, file_ext = os.path.splitext(inv_file)
+    if file_ext.lower() == '.txt':
+        ep_read_sources_txt(inv_file, path, source_schema, conf_schema, input_type)
+    elif file_ext.lower() in ('.conf', '.cfg', '.ini'):
+        log.info('Reading ini-style emission inventory list...')
+        ep_read_sources_ini(inv_file, path, source_schema, conf_schema, input_type)
+
+
+def ep_read_sources_ini(inv_file, path, source_schema, conf_schema, input_type):
+    """
+    Reads emission (Activity) sources listes in inv_file (ini-style).
+    """
+
+    confspec_inv_list = ep_internal_path('conf', 'configspec-inventory_list.conf')
+    inv_list_config = ConfigFile(inv_file, confspec_inv_list).values()
+
+    confspec_source_file = ep_internal_path('conf', 'configspec-sources.conf')
+
+    if not ep_cfg.input_params.inventories_to_import:
+        inventories_to_import = list(inv_list_config)
+    else:
+        inventories_to_import = [i for i in inv_list_config if i in ep_cfg.input_params.inventories_to_import]
+
+    for rec_name in inventories_to_import:
+        inv_cfg = inv_list_config[rec_name]
+        if inv_cfg.type == 'geometry':
+            inv_id = 0
+            report.record.message('Geometry:')
+        else:
+            inv_id, new_inv = ep_register_inventory(inv_cfg.inventory, source_schema)
+
+            # read category and emission specie mappings if necessary
+            if new_inv:
+                report.record.message('Inventory: {}.', inv_cfg.inventory)
+                read_category_mapping(inv_id, source_schema, path, inv_cfg.inventory)
+                read_specie_mapping(inv_id, conf_schema, source_schema, path, inv_cfg.inventory, input_type)
+                report.record.message('   Specie and category mapping imported from directory: {}.', os.path.abspath(path))
+                
+            try:
+                ep_connection.commit()
+            except psycopg2.Error:
+                pass
+
+        # read raw data
+        # check if the raw file is already read
+        file_id, file_table, new_file = ep_get_source_file_id(inv_cfg.file_name, source_schema)
+
+        if new_file:
+            log.fmt_info('Importing file {}.', inv_cfg.file_name)
+
+            # file raw table name
+            file_table = '_'.join([TABLE_IN_RAW, inv_cfg.file_name])
+
+            # raw file path
+            file_path = os.path.join(path, inv_cfg.file_path)
+            
+            # get config from the info file
+            ifile = os.path.join(path, inv_cfg.file_info_path)
+            if os.path.exists(ifile):
+                file_info_config = ConfigFile(ifile, confspec_source_file).values()
+            else:
+                log.fmt_error('Info file {} not found.', ifile)
+
+            log.fmt_info('Attempting to read raw {} into {}.{}', file_path, source_schema, file_table)
+            ep_read_raw_sources(file_path, source_schema, file_table, file_info_config)
+            report.record.message('   Sources file {} imported: {}.', inv_cfg.file_name, os.path.abspath(file_path))
+            
+            # register new file
+            file_id = ep_register_source_file(inv_cfg.file_name, inv_id, file_path, file_table, source_schema)
+
+            log.fmt_debug('Source file {} imported as ID {} into table {}.', inv_cfg.file_name, file_id, file_table)
+
+    # process source files into source sets in next cycle
+    # due to parallelization of the process
+    # (we need avoid double registering of one source file which
+    # has more source sets)
+
+    log.info('Processing imported emission sources into inner FUME format.')
+    report.record.message('\nFollowing esets were processed:')
+
+    for rec_name in inventories_to_import:
+        inv_cfg = inv_list_config[rec_name]
+
+        # get file info
+        file_id, file_table, new_file = ep_get_source_file_id(inv_cfg.file_name, source_schema)
+        
+        # get config from the info file
+        ifile = os.path.join(path, inv_cfg.file_info_path)
+        file_info_config = ConfigFile(ifile, confspec_source_file).values()
+        
+        # get eset name
+        if inv_cfg.set:
+            eset_name = inv_cfg.set
+        else:
+            eset_name = inv_cfg.file_name
+
+        log.fmt_info('Processing set {} into inner FUME format.', eset_name)
+        
+        # processing geometries 
+        # get name of geometry set
+        geom_name = file_info_config.geom_name
+        # TODO check type and length of geom_name!!!
+        if geom_name is not None:
+            gset_name = geom_name
+        else:
+            gset_name = eset_name
+            
+        # check if geometry is already available
+        gset_id, new_gset = ep_get_gset_id(gset_name, source_schema)
+
+        if new_gset:
+            # get geometry info
+            gset_info = file_info_config.geom_info
+            if gset_info is None:
+                # the file has no separate geom_info files
+                # the description of the geometry is included in file_info
+                gset_info = [inv_cfg.file_info_path]
+
+            # process raw inventory data into a new source set
+            # register geometry set
+            gset_id = ep_register_gset(gset_name, file_table, inv_cfg.filter, inv_cfg.file_path, gset_info, file_id, source_schema)
+
+            # process raw geometry into ep_in_geometries
+            # process all geom_info files
+            for ginfo in gset_info:
+                # get config from the info file
+                gfile = os.path.join(path, ginfo)
+                gconfig = ConfigFile([ifile, gfile], confspec_source_file).values()
+
+                # process raw geometries
+                log.debug('Processing raw geometries ', gset_name)
+                ep_process_raw_geometries(ep_connection, source_schema, file_table, gset_id, inv_cfg.filter, gconfig)
+
+            log.fmt_debug('Geometry set {} imported as ID {}.', gset_name, gset_id)
+
+        if inv_cfg.type == 'emission':
+            # get eset_id
+            eset_id, new_eset = ep_get_eset_id(eset_name, source_schema)
+
+            if new_eset:
+                # process raw inventory data into a new source set
+                log.fmt_debug(f'ep_register_eset({eset_name}, {file_id}, {ifile}, {gset_id}, {inv_cfg.filter}, {file_info_config.data_type}, {source_schema}, {inv_cfg.scenarios}, {inv_cfg.vertical_distributions})')
+                eset_id = ep_register_eset(eset_name, file_id, ifile, gset_id, inv_cfg.filter, file_info_config.data_type, source_schema, inv_cfg.scenarios, inv_cfg.vertical_distributions)
+
+                # process raw inventory data
+                log.fmt_info('Processing emission raw file {} into set {}.',
+                              inv_cfg.file_name, eset_name)
+                temp_view = 'RAW_SOURCES_TEMP'
+                report.record.message('Eset: {}, Filter applied: {filter}, Scenarios applied: {scenario}, Vertical distributions assigned: {vdist}',
+                   eset_name,
+                   filter=inv_cfg.filter if inv_cfg.filter else "-",
+                   scenario=', '.join(inv_cfg.scenarios) if inv_cfg.scenarios else "-",
+                   vdist=', '.join(inv_cfg.vertical_distributions) if inv_cfg.vertical_distributions else "-")
+                ep_process_raw_sources(ep_connection, source_schema, file_table, temp_view, eset_id, inv_cfg.filter, file_info_config)
+                log.sql_debug(ep_connection)
+
+                report.record.sql('   Emission categories found in eset',
+                   'SELECT DISTINCT cat_id::text FROM "{source_schema}".ep_in_emissions '\
+                   'JOIN "{source_schema}".ep_in_sources using (source_id) '\
+                   'WHERE eset_id = {} ',
+                   eset_id, source_schema=source_schema)
+                report.record.sql('   Species found in eset',
+                   'SELECT DISTINCT name::text FROM "{source_schema}".ep_in_emissions '\
+                   'JOIN "{source_schema}".ep_in_sources using (source_id) '\
+                   'JOIN "{conf_schema}".ep_in_species using (spec_in_id) '\
+                   'WHERE eset_id = {} ',
+                   eset_id, conf_schema=conf_schema, source_schema=source_schema)
+                log.fmt_debug('Emission set {} processed as eset_id {}.', eset_name, eset_id)
+
+
+def ep_read_sources_txt(inv_file, path, source_schema, conf_schema, input_type):
     """ Reads emission (activity) sources data listed in inventory file.
 
     Parameters:
@@ -299,18 +474,19 @@ def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
             if new_eset:
                 # process raw inventory data into a new source set
                 # assign scenario (if given) to eset
-                if (len(line) > 6):
+                if (len(line) > 6 and line[6] != ''):
                     scenario_names = [scen.strip() for scen in line[6].strip().split(',')]
                 else:
-                    scenario_names = [""]
+                    scenario_names = []
 
                 # assign vdistribution (if given) to eset
-                if (len(line) > 7):
-                    vdist_names = line[7].strip().split(',')
+                if (len(line) > 7 and line[7] != ''):
+                    vdist_names = [vdist.strip() for scen in line[7].strip().split(',')]
                 else:
-                    vdist_names = [""]
+                    vdist_names = []
 
                 # register new eset
+                log.debug(f'ep_register_eset({eset_name}, {file_id}, {ifile}, {gset_id}, {set_filter}, {config.data_type}, {source_schema}, {scenario_names}, {vdist_names})')
                 eset_id = ep_register_eset(eset_name, file_id, ifile, gset_id, set_filter, config.data_type, source_schema, scenario_names, vdist_names)
 
                 # process raw inventory data
@@ -320,8 +496,8 @@ def ep_read_sources(inv_file, path, source_schema, conf_schema, input_type):
                 report.record.message('Eset: {}, Filter applied: {filter}, Scenarios applied: {scenario}, Vertical distributions assigned: {vdist}',
                    eset_name,
                    filter=set_filter if set_filter else "-",
-                   scenario=', '.join(scenario_names) if scenario_names[0] else "-",
-                   vdist=', '.join(vdist_names) if vdist_names[0] else "-")
+                   scenario=', '.join(scenario_names) if scenario_names else "-",
+                   vdist=', '.join(vdist_names) if vdist_names else "-")
                 ep_process_raw_sources(ep_connection, source_schema, file_table, temp_view, eset_id, set_filter, config)
                 log.sql_debug(ep_connection)
 
@@ -384,6 +560,7 @@ def read_specie_mapping(id, conf_schema, schema, path, inv_name, input_type):
     cur = ep_connection.cursor()
     sqltext = 'INSERT INTO "{}".{} (inv_id, orig_name, {}, unit, conv_factor) VALUES (%s, %s, %s, %s, %s)'.format(schema, tablename, id_col_name)
 
+    log.fmt_debug('Reading in the species mapping file', filepath)
     with open(filepath, mode='r', encoding='utf8') as csvfile:
         reader = csv.reader(csvfile, delimiter=',', quotechar='"')
         _ = ep_read_header(reader)
@@ -395,7 +572,11 @@ def read_specie_mapping(id, conf_schema, schema, path, inv_name, input_type):
 
             # fetch foreign_key
             cur.execute('SELECT {} FROM "{}".{} WHERE name = %s'.format(id_col_name, conf_schema, ftable), (line[1], ))
-            spec_in_id = cur.fetchone()[0]
+            try:
+                spec_in_id = cur.fetchone()[0]
+            except:
+                log.error('Error reading species mapping:', id_col_name, conf_schema, ftable, line)
+                raise
 
             # calculate unit conversion factor
             unit = line[2]
