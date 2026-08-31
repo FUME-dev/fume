@@ -251,7 +251,7 @@ def get_plume_frac(nlay,hght,temp,press,wind,hstk,dstk,tstk,vstk):
         zstk = hght[kstk-1]
         layerfound = True
     k = 0
-    while (k < nlay-1 and layerfound == False):
+    while (k <= nlay-1 and layerfound == False):
         if (hght[k] >= zstk):
             kstk = k
             layerfound = True

@@ -456,12 +456,6 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
                               self.static_driver.dimensions['x'].size, self.static_driver.dimensions['y'].size)
                 raise IOError
 
-            # check needed variables
-            if not ('buildings_2d' in self.static_driver.variables.keys() or \
-                    'buildings_3d' in self.static_driver.variables.keys()):
-                log.error("Static driver does not contain variable buildings_3d or buildings_2d. Exit.....")
-                raise IOError
-
             if list(self.static_driver.variables.keys()).index('zt') < 0:
                 log.error("Static driver does not contain variable zt. Exit.....")
                 raise IOError
@@ -469,21 +463,28 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
             # retrieve zt and nt data (terrain height in m and number of terrain layers)
             self.zt = self.static_driver.variables['zt'][:].data
 
-            # retrieve buildings_3d
-            try:
-                self.b3d = self.static_driver.variables['buildings_3d'][:].filled(0).astype(bool)
-            except:
-                # build b3d from b2d
-                b2d = self.static_driver.variables['buildings_2d'][:].filled(0)
-                maxh = b2d.max()
-                # PALM requires not stretched vertical levels inside the urban canopy
-                # The b3d array can be calculated just from dz
-                maxk = math.floor(maxh / ep_rtcfg.delz) + 1
-                self.b3d = np.zeros((maxk, b2d.shape[0], b2d.shape[1]), dtype=bool)
-                for i in range(np.shape(b2d)[1]):
-                    for j in range(np.shape(b2d)[0]):
-                        if b2d[j, i] >= ep_rtcfg.delz * 0.5:
-                            self.b3d[0:math.floor(b2d[j, i] / ep_rtcfg.delz + 0.5) + 1, j, i] = True
+            # check needed variables
+            if not ('buildings_2d' in self.static_driver.variables.keys() or \
+                    'buildings_3d' in self.static_driver.variables.keys()):
+                log.warning("Static driver does not contain variable buildings_3d or buildings_2d. No buildings are considered.")
+                self.b3d = np.zeros((ep_cfg.domain.nz+1, self.zt.shape[0], self.zt.shape[1]), dtype=bool)
+
+            else:
+                # retrieve buildings_3d
+                try:
+                    self.b3d = self.static_driver.variables['buildings_3d'][:].filled(0).astype(bool)
+                except:
+                    # build b3d from b2d
+                    b2d = self.static_driver.variables['buildings_2d'][:].filled(0)
+                    maxh = b2d.max()
+                    # PALM requires not stretched vertical levels inside the urban canopy
+                    # The b3d array can be calculated just from dz
+                    maxk = math.floor(maxh / ep_rtcfg.delz) + 1
+                    self.b3d = np.zeros((maxk, b2d.shape[0], b2d.shape[1]), dtype=bool)
+                    for i in range(np.shape(b2d)[1]):
+                        for j in range(np.shape(b2d)[0]):
+                            if b2d[j, i] >= ep_rtcfg.delz * 0.5:
+                                self.b3d[0:math.floor(b2d[j, i] / ep_rtcfg.delz + 0.5) + 1, j, i] = True
         finally:
             self.static_driver.close()
 
@@ -511,6 +512,14 @@ class PALMVsrcTimeWriter(NetCDFAreaTimeDisaggregator):
             # i, j, level, spec_id, cat_id, ts_id, height, diameter, temperature, velocity, emiss
             pvsrc = PointVsrcEmis(*row)
             self.point_vsrc_emiss.append(pvsrc)
+
+    def receive_time_shifts(self, time_shifts):
+        self.time_shifts = time_shifts
+        self.ts = []
+        for ts_id in time_shifts:
+            if ts_id[0] not in self.ts:
+                self.ts.append(ts_id[0])
+        self.ts_lookup = {member: idx for idx, member in enumerate(self.ts)}
 
     def yield_time_factors(self, ts_id, catid):
         """Yield (time_idx, time_factor) for each timestep."""

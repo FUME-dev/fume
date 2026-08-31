@@ -78,6 +78,7 @@ class DataProvider(metaclass=DataProviderMeta):
 
     def __init__(self, *args, **kwargs):
         self.receivers = defaultdict(list)
+        self.receiver_order = []
 
         if 'cfg' in kwargs:
             self.cfg = kwargs['cfg']
@@ -96,12 +97,16 @@ class DataProvider(metaclass=DataProviderMeta):
         registered as a receiver.
         """
         log.debug('*** Pack hooks', pack_hooks)
+        is_included = False
         for pack in pack_hooks:
             rcv_fun = 'receive_{pack}'.format(pack=pack)
             if hasattr(receiver, rcv_fun):
                 rcv_fun_obj = getattr(receiver, rcv_fun)
                 if callable(rcv_fun_obj):
                     self.receivers[pack].append(receiver)
+                    is_included = True
+        if is_included:
+            self.receiver_order.append(receiver)
 
     def distribute(self, pack, *args, **kwargs):
         """
@@ -138,14 +143,14 @@ class DataProvider(metaclass=DataProviderMeta):
             met['ran'] = True
 
     def run(self):
-        receivers = set([r for p in self.receivers.values() for r in p])
-        for r in receivers:
+        #receivers = set([r for p in self.receivers.values() for r in p])
+        for r in self.receiver_order:
             if hasattr(r, 'setup') and callable(r.setup):
                 r.setup()
 
         for pack in pack_hooks:
             self._run_hook(pack)
 
-        for r in receivers:
+        for r in self.receiver_order:
             if hasattr(r, 'finalize') and callable(r.finalize):
                 r.finalize()
